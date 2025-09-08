@@ -2,6 +2,7 @@
 
 A desktop application for scheduling posts to VK (VKontakte) groups with advanced photo management and posting automation.
 
+![VK Post Scheduler Main Interface](screenshots/main_interface.png)
 
 ## 📋 Table of Contents
 
@@ -42,9 +43,6 @@ A desktop application for scheduling posts to VK (VKontakte) groups with advance
 - **🔒 Secure Configuration**: Safe token storage and management
 - **🚀 Performance Optimized**: Efficient memory usage and background processing
 
-## 📸 Screenshots
-
-*Note: Add screenshots of the application interface here*
 
 ## 📦 Installation
 
