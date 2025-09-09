@@ -124,3 +124,89 @@ class VKConfigManager:
             return None
         return self._secrets.get(name)
 
+    # -- selection ---------------------------------------------------------
+
+    def set_selection(self, token_name: Optional[str], group_name: Optional[str] = None) -> None:
+        if token_name and token_name not in self.tokens:
+            raise ValueError(f"Token '{token_name}' not found")
+        if token_name and group_name:
+            token = self.tokens[token_name]
+            if not token.get_group(group_name):
+                raise ValueError(f"Group '{group_name}' not found in token '{token_name}'")
+        self.selected_token = token_name
+        self.selected_group = group_name
+        self.save()
+
+    def get_selection(self):
+        return self.selected_token, self.selected_group
+
+    def has_valid_selection(self) -> bool:
+        return (
+            self.selected_token is not None
+            and self.selected_group is not None
+            and self.token_value(self.selected_token) is not None
+            and self.selected_group_id() is not None
+        )
+
+    def selected_token_value(self) -> Optional[str]:
+        return self.token_value(self.selected_token) if self.selected_token else None
+
+    def selected_group_id(self) -> Optional[str]:
+        token = self.tokens.get(self.selected_token) if self.selected_token else None
+        if not token or not self.selected_group:
+            return None
+        group = token.get_group(self.selected_group)
+        return group.group_id if group else None
+
+    # -- persistence ---------------------------------------------------------
+
+    def load(self) -> None:
+        if not os.path.exists(self.config_file):
+            self.save()
+            return
+
+        try:
+            with open(self.config_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            log.error("config %s is unreadable: %s", self.config_file, e)
+            self.tokens = {}
+            self._secrets = {}
+            self.selected_token = None
+            self.selected_group = None
+            self.save()
+            return
+
+        self.tokens = {}
+        self._secrets = {}
+        for name, tok in data.get("tokens", {}).items():
+            groups = [VKGroup(**g) for g in tok.get("groups", [])]
+            self.tokens[name] = VKToken(name=name, groups=groups)
+            if "token" in tok:
+                self._secrets[name] = tok["token"]
+
+        self.selected_token = data.get("selected_token")
+        self.selected_group = data.get("selected_group")
+        if self.selected_token and self.selected_token not in self.tokens:
+            self.selected_token = None
+            self.selected_group = None
+
+        self.save()
+
+    def save(self) -> None:
+        data = {
+            "tokens": {
+                name: {
+                    "token": self._secrets.get(name, ""),
+                    "groups": [
+                        {"name": g.name, "group_id": g.group_id}
+                        for g in tok.groups
+                    ],
+                }
+                for name, tok in self.tokens.items()
+            },
+            "selected_token": self.selected_token,
+            "selected_group": self.selected_group,
+        }
+        with open(self.config_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
