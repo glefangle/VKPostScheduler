@@ -474,7 +474,7 @@ class VKAPIHandler:
         })
         
         try:
-            result = api.docs.getWallUploadServer(group_id=group_id)
+            result = api.docs.getWallUploadServer()
             
             self._crash_log("VK_API_RESPONSE", "docs.getWallUploadServer API response", {
                 'method': 'docs.getWallUploadServer',
@@ -552,8 +552,7 @@ class VKAPIHandler:
         try:
             saved_doc = api.docs.save(
                 file=doc_data['file'], 
-                title=title, 
-                group_id=group_id
+                title=title
             )
             
             self._crash_log("VK_API_RESPONSE", "docs.save API response", {
