@@ -7,7 +7,6 @@ A desktop application for scheduling posts to VK (VKontakte) groups with advance
 ## 📋 Table of Contents
 
 - [Features](#-features)
-- [Screenshots](#-screenshots)
 - [Installation](#-installation)
 - [Quick Start](#-quick-start)
 - [Configuration](#-configuration)
@@ -35,6 +34,7 @@ A desktop application for scheduling posts to VK (VKontakte) groups with advance
 - **📊 Progress Tracking**: Real-time progress monitoring and statistics
 - **🔄 Background Processing**: Non-blocking GUI with threaded job processing
 - **💾 State Persistence**: Jobs and configuration survive application restarts
+- **🖼️ GIF transformer**: GIF transformation for VK aspect ratio requirements
 
 ### Technical Features
 - **🛡️ Crash Detection**: Advanced Qt crash detection and logging system
@@ -443,10 +443,6 @@ source dev_env/bin/activate  # or dev_env\Scripts\activate on Windows
 pip install -r requirements.txt
 ```
 
-3. **Run tests** (if available):
-```bash
-python -m pytest tests/
-```
 
 ### Code Style
 
@@ -480,12 +476,17 @@ When reporting bugs, include:
 
 ## 🔄 Changelog
 
-### Version 0.9.5 (Current)
+### Version 0.9.6 (Current)
+
+- 🖼️ GIF transformation for VK aspect ratio requirements
+- 🔧 GIF posting bug fixes
+
+### Version 0.9.5 
 - ✨ Complete PyQt5 GUI implementation
 - 🔄 Advanced photo rotation system
 - 🛡️ Qt crash detection and logging
 - ⏸️ Pause/resume functionality
 - 💾 Persistent job state management
-- 🎯 Different posts mode with photo indexing
+- 🎯 Different posts and same post mode with photo indexing
 - 📊 Real-time progress tracking
 - 🔧 Enhanced error handling and recovery

@@ -21,6 +21,7 @@ from typing import Optional, Dict, Any, List, Union
 import json
 
 from vk_config import VKConfigManager
+from gif_transformer import GIFTransformer
 
 
 class VKAPIHandler:
@@ -46,6 +47,7 @@ class VKAPIHandler:
         self.vk_config = vk_config
         self.crash_logger = crash_logger or logging.getLogger('qt_crash_detection')
         self._api_session = None
+        self.gif_transformer = GIFTransformer()
         
     def _crash_log(self, category: str, message: str, extra_data: Optional[dict] = None):
         """Write VK API debug info to crash detection log"""
@@ -182,7 +184,7 @@ class VKAPIHandler:
             raise
     
     def upload_gif_to_group(self, api: Any, gif_path: str, group_id: int, 
-                           gif_name: Optional[str] = None) -> str:
+                           gif_name: Optional[str] = None, gif_transform: bool = True) -> str:
         """
         Upload GIF to VK group as document and return attachment string
         
@@ -191,6 +193,7 @@ class VKAPIHandler:
             gif_path: Path to GIF file
             group_id: VK group ID (will be converted to positive)
             gif_name: Optional name for the GIF (defaults to filename)
+            gif_transform: Whether to transform GIF to meet VK requirements (default: True)
             
         Returns:
             str: Document attachment string (format: doc{owner_id}_{id})
@@ -207,15 +210,56 @@ class VKAPIHandler:
         positive_group_id = abs(group_id)
         gif_name = gif_name or os.path.basename(gif_path)
         
+        # Handle GIF transformation if enabled and needed
+        actual_gif_path = gif_path
+        temp_file_created = False
+        
+        if gif_transform:
+            try:
+                # Check if transformation is needed
+                gif_info = self.gif_transformer.get_gif_info(gif_path)
+                if 'error' not in gif_info and not gif_info.get('vk_compliant', False):
+                    self._crash_log("VK_API_REQUEST", "GIF transformation required", {
+                        'original_dimensions': f"{gif_info['width']}x{gif_info['height']}",
+                        'aspect_ratio': gif_info['aspect_ratio'],
+                        'vk_compliant': gif_info['vk_compliant']
+                    })
+                    
+                    # Transform the GIF
+                    transformed_path = self.gif_transformer.transform_gif(gif_path)
+                    if transformed_path != gif_path:
+                        actual_gif_path = transformed_path
+                        temp_file_created = True
+                        
+                        self._crash_log("VK_API_RESPONSE", "GIF transformation completed", {
+                            'original_file': os.path.basename(gif_path),
+                            'transformed_file': os.path.basename(actual_gif_path),
+                            'temp_file_created': temp_file_created
+                        })
+                else:
+                    self._crash_log("VK_API_REQUEST", "GIF transformation skipped - already compliant", {
+                        'dimensions': f"{gif_info.get('width', 'unknown')}x{gif_info.get('height', 'unknown')}",
+                        'aspect_ratio': gif_info.get('aspect_ratio', 'unknown'),
+                        'vk_compliant': gif_info.get('vk_compliant', False)
+                    })
+            except Exception as e:
+                self._crash_log("VK_API_WARNING", "GIF transformation failed, using original", {
+                    'error': str(e),
+                    'fallback': 'using_original_gif'
+                })
+                # Continue with original file if transformation fails
+        
         # Log GIF upload start
         self._crash_log("VK_API_REQUEST", "Starting GIF upload process", {
             'method': 'gif_upload_workflow',
-            'gif_file': os.path.basename(gif_path),
-            'gif_path': gif_path,
+            'gif_file': os.path.basename(actual_gif_path),
+            'gif_path': actual_gif_path,
             'gif_name': gif_name,
             'group_id': positive_group_id,
-            'file_size_bytes': os.path.getsize(gif_path),
-            'file_size_mb': round(os.path.getsize(gif_path) / (1024*1024), 2)
+            'gif_transform_enabled': gif_transform,
+            'using_transformed_file': temp_file_created,
+            'file_size_bytes': os.path.getsize(actual_gif_path),
+            'file_size_mb': round(os.path.getsize(actual_gif_path) / (1024*1024), 2)
         })
         
         try:
@@ -223,8 +267,8 @@ class VKAPIHandler:
             upload_server_response = self._get_doc_upload_server(api, positive_group_id)
             upload_url = upload_server_response['upload_url']
             
-            # Step 2: Upload GIF file to VK servers
-            doc_data = self._upload_gif_file(gif_path, upload_url)
+            # Step 2: Upload GIF file to VK servers (using actual_gif_path)
+            doc_data = self._upload_gif_file(actual_gif_path, upload_url)
             
             # Step 3: Save document to VK
             saved_doc = self._save_doc_to_vk(api, doc_data, gif_name, positive_group_id)
@@ -240,12 +284,33 @@ class VKAPIHandler:
                 'doc_id': doc_info['id'],
                 'owner_id': doc_info['owner_id'],
                 'original_file': os.path.basename(gif_path),
+                'transformed_file': os.path.basename(actual_gif_path) if temp_file_created else 'none',
                 'saved_title': doc_info.get('title', 'unknown')
             })
+            
+            # Clean up temporary file if created
+            if temp_file_created:
+                try:
+                    self.gif_transformer.cleanup_temp_files(actual_gif_path)
+                    self._crash_log("VK_API_RESPONSE", "Temporary GIF file cleaned up", {
+                        'temp_file': os.path.basename(actual_gif_path)
+                    })
+                except Exception as cleanup_error:
+                    self._crash_log("VK_API_WARNING", "Failed to cleanup temporary GIF file", {
+                        'temp_file': os.path.basename(actual_gif_path),
+                        'error': str(cleanup_error)
+                    })
             
             return attachment
             
         except Exception as e:
+            # Clean up temporary file on error
+            if temp_file_created:
+                try:
+                    self.gif_transformer.cleanup_temp_files(actual_gif_path)
+                except Exception:
+                    pass  # Ignore cleanup errors during exception handling
+            
             self._crash_log("VK_API_ERROR", "GIF upload workflow failed", {
                 'method': 'gif_upload_workflow',
                 'success': False,

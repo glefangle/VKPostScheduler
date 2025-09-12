@@ -1055,8 +1055,9 @@ class PostScheduler:
             attachment = self.vk_api.upload_photo_to_group(api, media_path, group_id)
         elif ext == '.gif':
             gif_name = self.current_post_data.get('gif_name') or os.path.basename(media_path)
-            self._notify_status(f"DEBUG: Uploading GIF via VK API handler")
-            attachment = self.vk_api.upload_gif_to_group(api, media_path, group_id, gif_name)
+            gif_transform = self.current_post_data.get('gif_transform', True)
+            self._notify_status(f"DEBUG: Uploading GIF via VK API handler (transform: {gif_transform})")
+            attachment = self.vk_api.upload_gif_to_group(api, media_path, group_id, gif_name, gif_transform)
         else:
             raise ValueError("Invalid file extension. Only JPG, JPEG, PNG, and GIF files are allowed.")
         

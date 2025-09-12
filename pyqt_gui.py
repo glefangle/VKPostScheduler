@@ -33,6 +33,7 @@ class PostData:
     photo_path: Optional[str] = None  # Keep for backward compatibility
     photo_paths: List[str] = None  # New field for multiple photos
     gif_name: str = ""
+    gif_transform: bool = True  # Enable GIF transformation for VK compliance
     start_date: str = ""
     end_date: str = ""
     times: List[str] = None
@@ -650,6 +651,7 @@ class PostSchedulerPyQtGUI(QMainWindow):
         self.times = []
         self.sleep_time = 1
         self.different_posts = True
+        self.gif_transform = True
         
         self.setup_ui()
         self.setup_connections()
@@ -792,13 +794,26 @@ class PostSchedulerPyQtGUI(QMainWindow):
         image_layout.addWidget(self.browse_photo_btn)
         content_layout.addLayout(image_layout)
         
-        # GIF Name
+        # GIF Name and Transform options
         gif_layout = QHBoxLayout()
         gif_layout.addWidget(QLabel("GIF Name:"))
         self.gif_name_edit = ModernLineEdit()
         gif_layout.addWidget(self.gif_name_edit)
         gif_layout.addStretch()
         content_layout.addLayout(gif_layout)
+        
+        # GIF Transform checkbox
+        gif_transform_layout = QHBoxLayout()
+        self.gif_transform_checkbox = QCheckBox("Transform GIF for VK compliance (0.66:1 to 2.5:1 aspect ratio)")
+        self.gif_transform_checkbox.setFont(QFont("Segoe UI", 9))
+        self.gif_transform_checkbox.setChecked(True)  # Enable by default
+        self.gif_transform_checkbox.setToolTip(
+            "Automatically adjust GIF dimensions to meet VK's aspect ratio requirements.\n"
+            "VK requires aspect ratios between 0.66:1 and 2.5:1 for proper display."
+        )
+        gif_transform_layout.addWidget(self.gif_transform_checkbox)
+        gif_transform_layout.addStretch()
+        content_layout.addLayout(gif_transform_layout)
         
         # Different posts checkbox
         self.different_posts_checkbox = QCheckBox("Enable different posts")
@@ -1047,6 +1062,9 @@ class PostSchedulerPyQtGUI(QMainWindow):
         
         # Different posts checkbox
         self.different_posts_checkbox.toggled.connect(self.toggle_different_posts)
+        
+        # GIF transform checkbox
+        self.gif_transform_checkbox.toggled.connect(self.toggle_gif_transform)
     
     def refresh_vk_selections(self):
         """Refresh the token and group comboboxes"""
@@ -1299,6 +1317,30 @@ class PostSchedulerPyQtGUI(QMainWindow):
             else:
                 QMessageBox.information(self, "Different posts disabled", "Different posts feature is now disabled")
     
+    def toggle_gif_transform(self, checked: bool):
+        """Handle GIF transform checkbox toggle"""
+        # Update internal state
+        self.gif_transform = checked
+        
+        # Ensure checkbox state is synchronized (important for tests)
+        # Use blockSignals to prevent recursive signal emission
+        self.gif_transform_checkbox.blockSignals(True)
+        self.gif_transform_checkbox.setChecked(checked)
+        self.gif_transform_checkbox.blockSignals(False)
+        
+        # Show dialogs only if we're not in test mode (avoid blocking in tests)
+        if not hasattr(self, '_testing_mode') or not self._testing_mode:
+            if checked:
+                QMessageBox.information(
+                    self, "GIF transform enabled", 
+                    "GIFs will be automatically transformed to meet VK's aspect ratio requirements (0.66:1 to 2.5:1)."
+                )
+            else:
+                QMessageBox.information(
+                    self, "GIF transform disabled", 
+                    "GIFs will be uploaded without transformation. Note: VK may not display them properly if they don't meet aspect ratio requirements."
+                )
+    
     def add_time(self):
         """Add time to schedule"""
         current_time = self.time_edit.time().toString("HH:mm")
@@ -1373,6 +1415,7 @@ class PostSchedulerPyQtGUI(QMainWindow):
             photo_path=None if (different_posts and len(self.photo_paths) > 1) else (self.photo_paths[0] if self.photo_paths else None),
             photo_paths=self.photo_paths.copy(),  # Pass all selected photos
             gif_name=gif_name,
+            gif_transform=self.gif_transform_checkbox.isChecked(),
             start_date=start_date,
             end_date=end_date,
             times=self.times.copy(),
