@@ -167,3 +167,106 @@ class PostScheduler:
         self._ok = 0
         self._failed = 0
 
+    # -- queue control ----------------------------------------------------------
+
+    def reload_pending(self) -> int:
+        """Load persisted jobs back into the queue after a restart."""
+        jobs = self._load_jobs()
+        for job in jobs:
+            job.setdefault("attempt", 0)
+            self.queue.put(job)
+        if jobs:
+            self._total = len(jobs)
+        return len(jobs)
+
+    def cancel_job(self, post_time: str) -> bool:
+        """Drop one job; queued copies are marked cancelled."""
+        if not post_time:
+            return False
+        removed = self._remove_state_job(post_time)
+        if removed:
+            self._progress()
+        return removed
+
+    def clear_all(self):
+        self._throw_out_plan()
+        self._status("All pending jobs cleared.", important=True)
+        self._progress()
+
+    def pause(self):
+        self._pause.set()
+        self._status("Queue paused.", important=True)
+        self._progress()
+
+    def resume(self):
+        self._pause.clear()
+        self.ensure_worker()
+        self._status("Queue resumed.", important=True)
+        self._progress()
+
+    def is_paused(self) -> bool:
+        return self._pause.is_set()
+
+    def stop(self, preserve_jobs: bool = True):
+        """Stop the worker; pending jobs stay on disk unless preserve_jobs=False."""
+        running = self._worker_thread and self._worker_thread.is_alive()
+        self._stop.set()
+        self._pause.clear()
+
+        if not preserve_jobs:
+            self._throw_out_plan()
+
+        if running:
+            self._worker_thread.join(timeout=5)
+            if self._worker_thread.is_alive():
+                log.warning("worker thread did not stop within 5s")
+        self._progress()
+
+    def shutdown(self):
+        self.stop(preserve_jobs=True)
+
+    def ensure_worker(self):
+        """Start the worker thread unless one is still running."""
+        if self._worker_thread and self._worker_thread.is_alive():
+            if self._stop.is_set():
+                self._worker_thread.join(timeout=10)
+            if self._worker_thread.is_alive():
+                return
+        self._stop.clear()
+        self._worker_thread = threading.Thread(
+            target=self._worker, name="poster", daemon=True)
+        self._worker_thread.start()
+
+    def current_jobs(self) -> List[dict]:
+        """Pending jobs with display info for the status tab."""
+        result = []
+        for job in self._load_jobs():
+            info = {
+                "post_time": job.get("post_time", "?"),
+                "attempt": job.get("attempt", 0),
+                "status": "pending",
+            }
+            post_data = job.get("post_data", {})
+            paths = post_data.get("photo_paths", [])
+            if "photo_index" in job and 0 <= job["photo_index"] < len(paths):
+                info["photo"] = os.path.basename(paths[job["photo_index"]])
+                info["photo_no"] = job["photo_index"] + 1
+                info["photo_total"] = len(paths)
+            elif post_data.get("photo_path"):
+                info["photo"] = os.path.basename(post_data["photo_path"])
+                info["photo_no"] = 1
+                info["photo_total"] = 1
+            result.append(info)
+        return result
+
+    def stats(self) -> dict:
+        pending = len(self._load_jobs())
+        done = self._ok + self._failed
+        return {
+            "total": max(self._total, done + pending),
+            "completed": done,
+            "ok": self._ok,
+            "failed": self._failed,
+            "pending": pending,
+        }
+
