@@ -270,3 +270,153 @@ class PostScheduler:
             "pending": pending,
         }
 
+    # -- worker -----------------------------------------------------------------
+
+    def _worker(self):
+        log.info("worker started")
+        while not self._stop.is_set():
+            if self._pause.is_set():
+                self._pause.wait(0.5)
+                continue
+            try:
+                job = self.queue.get(timeout=0.5)
+            except Empty:
+                continue
+
+            try:
+                self._execute(job)
+            except Exception as e:
+                if self._handle_failure(job, e) == "stopped":
+                    break
+            else:
+                self._finish_success(job)
+
+            if not self._stop.is_set() and not self._pause.is_set():
+                time.sleep(max(0, job.get("sleep_time", 1)))
+        log.info("worker stopped")
+
+    def _execute(self, job: dict):
+        post_time = job["post_time"]
+        post_data = job.get("post_data", {})
+        self._status(f"Processing {post_time}")
+
+        token = self.config.get_token(job["token_name"])
+        group = token.get_group(job["group_name"]) if token else None
+        if group is None:
+            raise ValueError(f"Group '{job['group_name']}' no longer exists")
+        token_value = self.config.token_value(job["token_name"])
+        if not token_value:
+            raise ValueError(f"No stored token value for '{job['token_name']}'")
+
+        # bail out before uploading if the slot already passed
+        publish_ts = self._publish_ts(post_time)
+        group_id = abs(int(group.group_id))
+        api = self.client.api_for(token_value)
+
+        media = self._media_for(job, post_data)
+        attachment = ""
+        if media:
+            attachment = self._upload_media(api, media, group_id, post_data)
+
+        message = (post_data.get("text") or "").strip()
+        self.client.post_to_wall(api, -group_id, message or None,
+                                 attachment or None, publish_ts)
+
+    @staticmethod
+    def _publish_ts(post_time: str) -> int:
+        dt = datetime.strptime(post_time, "%Y-%m-%d %H:%M")
+        if dt <= datetime.now():
+            raise PublishTimeInPastError(
+                f"publish time {post_time} has already passed")
+        return int(dt.timestamp())
+
+    @staticmethod
+    def _media_for(job: dict, post_data: dict) -> Optional[str]:
+        paths = post_data.get("photo_paths", [])
+        if "photo_index" in job and 0 <= job["photo_index"] < len(paths):
+            return paths[job["photo_index"]]
+        return post_data.get("photo_path")
+
+    def _upload_media(self, api, path: str, group_id: int, post_data: dict) -> str:
+        if not os.path.exists(path):
+            raise FileNotFoundError(path)
+        ext = os.path.splitext(path)[1].lower()
+        if ext in PHOTO_EXTS:
+            return self.client.upload_photo(api, path, group_id)
+        if ext == ".gif":
+            return self.client.upload_gif(
+                api, path, group_id,
+                title=post_data.get("gif_name") or None)
+        raise ValueError(f"{path}: unsupported file type {ext}")
+
+    def _finish_success(self, job: dict):
+        self._remove_state_job(job["post_time"])
+        self._ok += 1
+        self._status(f"Posted {job['post_time']} to {job.get('group_name', '?')}")
+        self._progress()
+
+    def _handle_failure(self, job: dict, error: Exception) -> str:
+        """Park a failed job for retry, or fail it for good."""
+        post_time = job["post_time"]
+        attempt = job.get("attempt", 0)
+        log.error("job %s failed (try %d): %s", post_time, attempt + 1, error,
+                  exc_info=not isinstance(error, ApiError))
+
+        details = {
+            "post_time": post_time,
+            "group": job.get("group_name"),
+            "attempt": attempt,
+            "error": f"{type(error).__name__}: {error}",
+        }
+
+        # pause and tell the user; resuming skips the wait
+        self._pause.set()
+        self._status(f"Error on {post_time}: {error}", important=True)
+        self._notify_error(f"Posting error for {post_time}", details)
+
+        outcome = self._wait_while_paused(ERROR_WAIT)
+        if outcome == "stopped":
+            return "stopped"
+
+        if attempt < MAX_RETRIES:
+            backoff = (attempt + 1) * 60
+            self._status(f"Retrying {post_time} in {backoff // 60} min "
+                         f"(retry {attempt + 1}/{MAX_RETRIES})", important=True)
+            if self._wait_out_backoff(backoff) == "stopped":
+                return "stopped"
+            job["attempt"] = attempt + 1
+            self.queue.put(job)
+        else:
+            self._fail_job(job, f"{post_time} failed after "
+                                f"{MAX_RETRIES} retries: {error}")
+        return "ok"
+
+    def _fail_job(self, job: dict, message: str):
+        self._remove_state_job(job["post_time"])
+        self._failed += 1
+        self._status(message, important=True)
+        self._progress()
+
+    def _wait_while_paused(self, seconds: int) -> str:
+        """Hold while paused, at most seconds; the error dialog's grace period."""
+        for _ in range(int(seconds)):
+            if self._stop.is_set():
+                return "stopped"
+            if not self._pause.is_set():
+                return "resumed"
+            time.sleep(1)
+        return "ok"
+
+    def _wait_out_backoff(self, seconds: int) -> str:
+        """Count down the retry backoff; pause freezes it, stop ends it."""
+        left = int(seconds)
+        while left > 0:
+            if self._stop.is_set():
+                return "stopped"
+            if self._pause.is_set():
+                self._pause.wait(0.5)
+                continue
+            time.sleep(1)
+            left -= 1
+        return "ok"
+
