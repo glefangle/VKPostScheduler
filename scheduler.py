@@ -420,3 +420,94 @@ class PostScheduler:
             left -= 1
         return "ok"
 
+
+    def _load_state(self) -> dict:
+        if not os.path.exists(self._state_file):
+            return {}
+        try:
+            with open(self._state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError, ValueError) as e:
+            log.error("cannot read %s: %s", self._state_file, e)
+            return {}
+
+    def _save_state(self, data: dict) -> None:
+        try:
+            with open(self._state_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError as e:
+            log.error("failed to write %s: %s", self._state_file, e)
+
+    def _load_jobs(self) -> List[dict]:
+        return self._load_state().get("jobs", [])
+
+    def _save_jobs(self, jobs: List[dict]) -> None:
+        data = self._load_state()
+        data["jobs"] = jobs
+        self._save_state(data)
+
+    def _add_jobs(self, new_jobs: List[dict]) -> None:
+        if not new_jobs:
+            return
+        jobs = self._load_jobs()
+        jobs.extend(new_jobs)
+        self._save_jobs(jobs)
+
+    def _remove_state_job(self, post_time: str) -> bool:
+        jobs = self._load_jobs()
+        rest = [j for j in jobs if j.get("post_time") != post_time]
+        if len(rest) == len(jobs):
+            return False
+        self._save_jobs(rest)
+        return True
+
+    def _clear_state_jobs(self) -> None:
+        data = self._load_state()
+        data["jobs"] = []
+        self._save_state(data)
+
+    def _get_rotation(self, key: str) -> int:
+        return self._load_state().get("rotations", {}).get(key, {}).get("last_index", -1)
+
+    def _set_rotation(self, key: str, last_index: int) -> None:
+        data = self._load_state()
+        data.setdefault("rotations", {}).setdefault(key, {})["last_index"] = last_index
+        self._save_state(data)
+
+    def _reset_rotation(self, key: str) -> None:
+        data = self._load_state()
+        if key in data.get("rotations", {}):
+            del data["rotations"][key]
+            self._save_state(data)
+
+    # -- gui hooks ----------------------------------------------------------------
+
+    def _status(self, message: str, important: bool = False):
+        if not self.on_status:
+            return
+        if not important:
+            now = time.monotonic()
+            if now - self._last_status_at < 0.1:
+                return
+            self._last_status_at = now
+        try:
+            self.on_status(message)
+        except Exception:
+            log.exception("status callback failed")
+
+    def _progress(self):
+        if not self.on_progress:
+            return
+        try:
+            self.on_progress()
+        except Exception:
+            log.exception("progress callback failed")
+
+    def _notify_error(self, message: str, details: dict):
+        if not self.on_error:
+            return
+        try:
+            self.on_error(message, details)
+        except Exception:
+            log.exception("error callback failed")
