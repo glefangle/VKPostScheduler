@@ -210,3 +210,148 @@ class ErrorDialog(QDialog):
     def _copy(self):
         QApplication.clipboard().setText(self._format(self.details))
 
+
+class MainWindow(QMainWindow):
+    # signals marshal worker callbacks onto the gui thread
+    status_sig = pyqtSignal(str)
+    progress_sig = pyqtSignal()
+    error_sig = pyqtSignal(str, dict)
+
+    def __init__(self, scheduler: PostScheduler):
+        super().__init__()
+        self.scheduler = scheduler
+
+        self.photo_paths = []
+        self.times = []
+
+        scheduler.on_status = self.status_sig.emit
+        scheduler.on_progress = self.progress_sig.emit
+        scheduler.on_error = self.error_sig.emit
+        self.status_sig.connect(self._log)
+        self.progress_sig.connect(self._refresh_progress)
+        self.error_sig.connect(self._show_error)
+
+        self.setWindowTitle("VK Post Scheduler")
+        self.setMinimumSize(1000, 680)
+        self._apply_style()
+        self._build_ui()
+        self._connect()
+
+        self._refresh_selection()
+        self._refresh_progress()
+
+        pending = scheduler.reload_pending()
+        if pending:
+            self._log(f"Loaded {pending} pending job(s) from the previous session.")
+            scheduler.ensure_worker()
+
+    # -- setup ---------------------------------------------------------------
+
+    @staticmethod
+    def _apply_style():
+        qss = """
+        QMainWindow { background: #f8f9fa; }
+        QGroupBox {
+            font-weight: bold; border: 2px solid #dee2e6; border-radius: 8px;
+            margin-top: 10px; padding-top: 10px;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin; left: 10px; padding: 0 5px; color: #495057;
+        }
+        QLabel { color: #495057; }
+        QTabWidget::pane { border: 2px solid #dee2e6; border-radius: 8px; background: white; }
+        QTabBar::tab {
+            background: #e9ecef; border: 1px solid #dee2e6; padding: 8px 16px;
+            margin-right: 2px; border-top-left-radius: 5px; border-top-right-radius: 5px;
+        }
+        QTabBar::tab:selected { background: white; border-bottom-color: white; }
+        QListWidget {
+            border: 2px solid #e9ecef; border-radius: 5px; background: white;
+            color: #495057; outline: none;
+        }
+        QListWidget::item { padding: 6px; border-bottom: 1px solid #f8f9fa; }
+        QListWidget::item:selected { background: #4a90e2; color: white; }
+        QProgressBar {
+            border: 2px solid #e9ecef; border-radius: 10px; text-align: center;
+            background: #f8f9fa; color: #495057; font-weight: bold;
+        }
+        QProgressBar::chunk {
+            border-radius: 8px;
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                stop:0 #4a90e2, stop:1 #357abd);
+        }
+        """ + INPUT
+        QApplication.instance().setStyleSheet(qss)
+
+    def _build_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(16, 16, 16, 16)
+
+        self.tabs = QTabWidget()
+        root.addWidget(self.tabs)
+        self.tabs.addTab(self._post_tab(), "Post")
+        self.tabs.addTab(self._schedule_tab(), "Schedule")
+        self.tabs.addTab(self._status_tab(), "Status")
+
+        footer = QLabel("VK Post Scheduler v1.0.0")
+        footer.setStyleSheet("color: #6c757d; font-size: 11px;")
+        root.addWidget(footer, 0, Qt.AlignRight)
+
+    def _post_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        accounts = QGroupBox("VK account")
+        grid = QGridLayout(accounts)
+
+        grid.addWidget(QLabel("Token:"), 0, 0)
+        self.token_combo = QComboBox()
+        self.token_combo.setMinimumWidth(220)
+        grid.addWidget(self.token_combo, 0, 1)
+        for i, label in enumerate(("Add", "Edit", "Delete")):
+            btn = QPushButton(label)
+            btn.setStyleSheet(BUTTON_QUIET)
+            btn.setObjectName(f"token_{label.lower()}")
+            grid.addWidget(btn, 0, 2 + i)
+
+        grid.addWidget(QLabel("Group:"), 1, 0)
+        self.group_combo = QComboBox()
+        self.group_combo.setMinimumWidth(220)
+        grid.addWidget(self.group_combo, 1, 1)
+        for i, label in enumerate(("Add", "Edit", "Delete")):
+            btn = QPushButton(label)
+            btn.setStyleSheet(BUTTON_QUIET)
+            btn.setObjectName(f"group_{label.lower()}")
+            grid.addWidget(btn, 1, 2 + i)
+
+        layout.addWidget(accounts)
+
+        content = QGroupBox("Post content")
+        form = QVBoxLayout(content)
+
+        images_row = QHBoxLayout()
+        images_row.addWidget(QLabel("Images:"))
+        self.photos_label = QLabel("No files selected")
+        self.photos_label.setStyleSheet("color: #6c757d; font-style: italic;")
+        images_row.addWidget(self.photos_label)
+        images_row.addStretch()
+        self.browse_btn = QPushButton("Browse")
+        self.browse_btn.setStyleSheet(BUTTON_QUIET)
+        images_row.addWidget(self.browse_btn)
+        form.addLayout(images_row)
+
+        self.different_check = QCheckBox("Different posts (one image per time slot)")
+        self.different_check.setChecked(True)
+        form.addWidget(self.different_check)
+
+        form.addWidget(QLabel("Text:"))
+        self.text_edit = QTextEdit()
+        self.text_edit.setMaximumHeight(120)
+        form.addWidget(self.text_edit)
+
+        layout.addWidget(content)
+        layout.addStretch()
+        return tab
+
