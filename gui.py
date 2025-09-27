@@ -472,3 +472,122 @@ class MainWindow(QMainWindow):
         self.clear_btn.clicked.connect(self._clear_jobs)
         self.jobs_list.customContextMenuRequested.connect(self._jobs_menu)
 
+    # -- accounts -----------------------------------------------------------------
+
+    def _refresh_selection(self):
+        config = self.scheduler.config
+        names = config.token_names()
+        current_token, current_group = config.get_selection()
+
+        self.token_combo.blockSignals(True)
+        self.token_combo.clear()
+        self.token_combo.addItems(names)
+        if current_token and current_token in names:
+            self.token_combo.setCurrentText(current_token)
+        elif names:
+            self.token_combo.setCurrentText(names[0])
+            current_token = names[0]
+        self.token_combo.blockSignals(False)
+
+        groups = config.group_names(current_token) if current_token else []
+        self.group_combo.blockSignals(True)
+        self.group_combo.clear()
+        self.group_combo.addItems(groups)
+        if current_group and current_group in groups:
+            self.group_combo.setCurrentText(current_group)
+        elif groups:
+            self.group_combo.setCurrentText(groups[0])
+        self.group_combo.blockSignals(False)
+
+        if current_token and self.group_combo.currentText():
+            self.scheduler.config.set_selection(current_token,
+                                                self.group_combo.currentText())
+
+    def _on_token_changed(self, token_name: str):
+        if not token_name:
+            return
+        try:
+            self.scheduler.config.set_selection(token_name, None)
+        except ValueError as e:
+            log.error("%s", e)
+            return
+        groups = self.scheduler.config.group_names(token_name)
+        self.group_combo.blockSignals(True)
+        self.group_combo.clear()
+        self.group_combo.addItems(groups)
+        self.group_combo.blockSignals(False)
+        self.times.clear()
+        self.times_list.clear()
+
+    def _on_group_changed(self, group_name: str):
+        token_name = self.token_combo.currentText()
+        if not token_name or not group_name:
+            return
+        self.scheduler.config.set_selection(token_name, group_name)
+
+    def _token_add(self):
+        dialog = TokenDialog(self, self.scheduler.config)
+        if dialog.exec_():
+            self._refresh_selection()
+            self._log("Token added.")
+
+    def _token_edit(self):
+        name = self.token_combo.currentText()
+        if not name:
+            QMessageBox.warning(self, "No token", "Select a token to edit.")
+            return
+        dialog = TokenDialog(self, self.scheduler.config, name)
+        if dialog.exec_():
+            self._refresh_selection()
+            self._log("Token updated.")
+
+    def _token_delete(self):
+        name = self.token_combo.currentText()
+        if not name:
+            QMessageBox.warning(self, "No token", "Select a token to delete.")
+            return
+        if QMessageBox.question(self, "Confirm",
+                                f"Delete token '{name}' with all its groups?") != QMessageBox.Yes:
+            return
+        self.scheduler.config.remove_token(name)
+        self._refresh_selection()
+        self._log("Token deleted.")
+
+    def _group_add(self):
+        token_name = self.token_combo.currentText()
+        token = self.scheduler.config.get_token(token_name) if token_name else None
+        if not token:
+            QMessageBox.warning(self, "No token", "Select a token first.")
+            return
+        dialog = GroupDialog(self, token)
+        if dialog.exec_():
+            self._refresh_selection()
+            self._log("Group added.")
+
+    def _group_edit(self):
+        token_name = self.token_combo.currentText()
+        group_name = self.group_combo.currentText()
+        token = self.scheduler.config.get_token(token_name) if token_name else None
+        if not token or not group_name:
+            QMessageBox.warning(self, "No group", "Select a group to edit.")
+            return
+        dialog = GroupDialog(self, token, group_name)
+        if dialog.exec_():
+            self._refresh_selection()
+            self._log("Group updated.")
+
+    def _group_delete(self):
+        token_name = self.token_combo.currentText()
+        group_name = self.group_combo.currentText()
+        token = self.scheduler.config.get_token(token_name) if token_name else None
+        if not token or not group_name:
+            QMessageBox.warning(self, "No group", "Select a group to delete.")
+            return
+        if QMessageBox.question(self, "Confirm",
+                                f"Delete group '{group_name}'?") != QMessageBox.Yes:
+            return
+        token.remove_group(group_name)
+        self.scheduler.config.save()
+        self._refresh_selection()
+        self._log("Group deleted.")
+
