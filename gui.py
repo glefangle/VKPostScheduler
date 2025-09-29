@@ -591,3 +591,148 @@ class MainWindow(QMainWindow):
         self._refresh_selection()
         self._log("Group deleted.")
 
+    # -- post content ---------------------------------------------------------
+
+    def _browse_photos(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select images", "", "Images (*.jpg *.jpeg *.png *.gif)")
+        if not paths:
+            return
+        self.photo_paths = paths
+        names = [os.path.basename(p) for p in paths]
+        if len(names) == 1:
+            text = names[0]
+        else:
+            text = ", ".join(names[:3]) + (f" and {len(names) - 3} more"
+                                           if len(names) > 3 else "")
+        self.photos_label.setText(text)
+        self.photos_label.setStyleSheet("color: #28a745; font-weight: bold;")
+
+    # -- schedule ----------------------------------------------------------------
+
+    def _add_time(self):
+        t = self.time_edit.time().toString("HH:mm")
+        if t not in self.times:
+            self.times.append(t)
+            self.times_list.addItem(t)
+
+    def _remove_time(self):
+        item = self.times_list.currentItem()
+        if not item:
+            QMessageBox.information(self, "No selection", "Select a time to remove.")
+            return
+        self._drop_time(item)
+
+    def _times_menu(self, pos):
+        item = self.times_list.itemAt(pos)
+        if item:
+            menu = QMenu(self)
+            menu.addAction(f"Remove {item.text()}",
+                           lambda: self._drop_time(item))
+            menu.exec_(self.times_list.mapToGlobal(pos))
+
+    def _drop_time(self, item):
+        t = item.text()
+        if t in self.times:
+            self.times.remove(t)
+        self.times_list.takeItem(self.times_list.row(item))
+
+    def _schedule(self):
+        different = self.different_check.isChecked()
+        post = PostData(
+            text=self.text_edit.toPlainText().strip(),
+            photo_path=self.photo_paths[0] if self.photo_paths else None,
+            photo_paths=list(self.photo_paths),
+            different_posts=different,
+            sleep_time=self.sleep_spin.value(),
+        )
+        start = self.start_date.date().toString("yyyy-MM-dd")
+        end = self.end_date.date().toString("yyyy-MM-dd")
+
+        ok, error = self.scheduler.schedule(post, start, end, list(self.times))
+        if ok:
+            QMessageBox.information(self, "Scheduled",
+                                    "Posts are queued, the worker will "
+                                    "create them in the background.")
+        else:
+            QMessageBox.warning(self, "Not scheduled", error or "Unknown error")
+
+    # -- status -----------------------------------------------------------------
+
+    def _toggle_pause(self):
+        if self.scheduler.is_paused():
+            self.scheduler.resume()
+        else:
+            self.scheduler.pause()
+
+    def _clear_jobs(self):
+        if QMessageBox.question(
+                self, "Confirm",
+                "Remove all pending jobs? This cannot be undone.") != QMessageBox.Yes:
+            return
+        self.scheduler.clear_all()
+
+    def _jobs_menu(self, pos):
+        item = self.jobs_list.itemAt(pos)
+        if not item:
+            return
+        post_time = item.data(Qt.UserRole)
+        menu = QMenu(self)
+        menu.addAction("Remove job", lambda: self._remove_job(post_time))
+        menu.exec_(self.jobs_list.mapToGlobal(pos))
+
+    def _remove_job(self, post_time: str):
+        if not post_time:
+            return
+        if QMessageBox.question(
+                self, "Confirm", f"Remove the job for {post_time}?") != QMessageBox.Yes:
+            return
+        if self.scheduler.cancel_job(post_time):
+            self._log(f"Removed job {post_time}.")
+        else:
+            QMessageBox.warning(self, "Not found", f"No pending job for {post_time}.")
+
+    # -- worker updates -----------------------------------------------------------
+
+    def _log(self, message: str):
+        stamp = datetime.now().strftime("%H:%M:%S")
+        self.log_view.append(f"[{stamp}] {message}")
+        self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())
+
+    def _refresh_progress(self):
+        stats = self.scheduler.stats()
+        self.progress.setMaximum(max(1, stats["total"]))
+        self.progress.setValue(stats["completed"])
+        self.counters.setText(
+            f"Queued: {stats['total']} | Done: {stats['ok']} | "
+            f"Failed: {stats['failed']} | Pending: {stats['pending']}")
+
+        self.pause_btn.setText("Resume queue" if self.scheduler.is_paused()
+                               else "Pause queue")
+
+        self.jobs_list.clear()
+        for job in self.scheduler.current_jobs():
+            line = f"{job['post_time']}  (try {job['attempt'] + 1})"
+            if "photo" in job:
+                line += f"  {job['photo']}"
+                if job.get("photo_total", 1) > 1:
+                    line += f"  [{job['photo_no']}/{job['photo_total']}]"
+            item = QListWidgetItem(line)
+            item.setData(Qt.UserRole, job["post_time"])
+            self.jobs_list.addItem(item)
+
+    def _show_error(self, message: str, details: dict):
+        self._log(message)
+        self.raise_()
+        self.activateWindow()
+        dialog = ErrorDialog(self, message, details)
+        if dialog.exec_() == QDialog.Accepted:
+            self.scheduler.resume()
+            self._log("Queue resumed.")
+        else:
+            self._log("Queue stays paused.")
+
+    def closeEvent(self, event):
+        # stop the worker but keep unfinished jobs on disk
+        self.scheduler.shutdown()
+        event.accept()
