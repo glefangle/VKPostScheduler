@@ -5,6 +5,8 @@ __pycache__/
 dist/
 build/
 *.spec
+*.manifest
+*.exe
 vk_config.json
 jobs_state.json
 logs/
