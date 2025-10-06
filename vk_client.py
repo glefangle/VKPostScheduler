@@ -40,15 +40,15 @@ class VKClient:
     def upload_gif(self, api, path: str, group_id: int,
                    title: Optional[str] = None) -> str:
         """GIFs go up as documents."""
-        server = api.docs.getWallUploadServer(group_id=group_id)
+        # no group_id on purpose, see the VK docs for docs.getWallUploadServer
+        server = api.docs.getWallUploadServer()
         with open(path, "rb") as fh:
             resp = requests.post(server["upload_url"], files={"file": fh})
         resp.raise_for_status()
         doc_data = resp.json()
 
         saved = api.docs.save(file=doc_data["file"],
-                              title=title or os.path.basename(path),
-                              group_id=group_id)
+                              title=title or os.path.basename(path))
         doc = saved["doc"]
         log.info("uploaded gif %s as doc%d_%d",
                  os.path.basename(path), doc["owner_id"], doc["id"])
