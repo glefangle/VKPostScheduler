@@ -7,12 +7,14 @@ from typing import Optional
 import requests
 import vk_api
 
+from gif_transformer import GIFTransformer
+
 log = logging.getLogger(__name__)
 
 
 class VKClient:
     def __init__(self):
-        pass
+        self.gif = GIFTransformer()
 
     def api_for(self, token: str):
         """Authenticated api object per token, cached."""
@@ -38,21 +40,43 @@ class VKClient:
         return f"photo{saved['owner_id']}_{saved['id']}"
 
     def upload_gif(self, api, path: str, group_id: int,
-                   title: Optional[str] = None) -> str:
+                   title: Optional[str] = None, transform: bool = True) -> str:
         """GIFs go up as documents."""
-        # no group_id on purpose, see the VK docs for docs.getWallUploadServer
-        server = api.docs.getWallUploadServer()
-        with open(path, "rb") as fh:
-            resp = requests.post(server["upload_url"], files={"file": fh})
-        resp.raise_for_status()
-        doc_data = resp.json()
+        actual_path = path
+        temp_created = False
+        if transform:
+            actual_path, temp_created = self._maybe_transform(path)
 
-        saved = api.docs.save(file=doc_data["file"],
-                              title=title or os.path.basename(path))
-        doc = saved["doc"]
-        log.info("uploaded gif %s as doc%d_%d",
-                 os.path.basename(path), doc["owner_id"], doc["id"])
-        return f"doc{doc['owner_id']}_{doc['id']}"
+        try:
+            # no group_id on purpose, see the VK docs for docs.getWallUploadServer
+            server = api.docs.getWallUploadServer()
+            with open(actual_path, "rb") as fh:
+                resp = requests.post(server["upload_url"], files={"file": fh})
+            resp.raise_for_status()
+            doc_data = resp.json()
+
+            saved = api.docs.save(file=doc_data["file"],
+                                  title=title or os.path.basename(path))
+            doc = saved["doc"]
+            log.info("uploaded gif %s as doc%d_%d",
+                     os.path.basename(path), doc["owner_id"], doc["id"])
+            return f"doc{doc['owner_id']}_{doc['id']}"
+        finally:
+            if temp_created:
+                self.gif.cleanup(actual_path)
+
+    def _maybe_transform(self, path: str):
+        """Pad/crop the gif into vk's limits; on failure post the original."""
+        try:
+            info = self.gif.info(path)
+            if "error" in info or info.get("vk_compliant"):
+                return path, False
+            log.info("gif %s is %.2f:1, transforming for vk",
+                     os.path.basename(path), info["aspect_ratio"])
+            return self.gif.transform(path), True
+        except Exception as e:
+            log.warning("gif transform failed (%s), using the original", e)
+            return path, False
 
     # -- posting ----------------------------------------------------------
 

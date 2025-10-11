@@ -346,6 +346,17 @@ class MainWindow(QMainWindow):
         self.different_check.setChecked(True)
         form.addWidget(self.different_check)
 
+        gif_row = QHBoxLayout()
+        gif_row.addWidget(QLabel("GIF name:"))
+        self.gif_name_edit = QLineEdit()
+        gif_row.addWidget(self.gif_name_edit)
+        form.addLayout(gif_row)
+
+        self.gif_transform_check = QCheckBox(
+            "Transform GIFs to VK limits (0.66:1 - 2.5:1)")
+        self.gif_transform_check.setChecked(True)
+        form.addWidget(self.gif_transform_check)
+
         form.addWidget(QLabel("Text:"))
         self.text_edit = QTextEdit()
         self.text_edit.setMaximumHeight(120)
@@ -644,6 +655,8 @@ class MainWindow(QMainWindow):
             photo_path=self.photo_paths[0] if self.photo_paths else None,
             photo_paths=list(self.photo_paths),
             different_posts=different,
+            gif_name=self.gif_name_edit.text().strip(),
+            gif_transform=self.gif_transform_check.isChecked(),
             sleep_time=self.sleep_spin.value(),
         )
         start = self.start_date.date().toString("yyyy-MM-dd")

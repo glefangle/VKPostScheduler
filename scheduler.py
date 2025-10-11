@@ -35,6 +35,7 @@ class PostData:
     photo_paths: List[str] = field(default_factory=list)
     different_posts: bool = False
     gif_name: str = ""
+    gif_transform: bool = True
     sleep_time: int = 1
 
 
@@ -140,6 +141,7 @@ class PostScheduler:
                         "photo_paths": post.photo_paths,
                         "different_posts": post.different_posts,
                         "gif_name": post.gif_name,
+                        "gif_transform": post.gif_transform,
                     },
                     "sleep_time": post.sleep_time,
                 }
@@ -346,7 +348,8 @@ class PostScheduler:
         if ext == ".gif":
             return self.client.upload_gif(
                 api, path, group_id,
-                title=post_data.get("gif_name") or None)
+                title=post_data.get("gif_name") or None,
+                transform=post_data.get("gif_transform", True))
         raise ValueError(f"{path}: unsupported file type {ext}")
 
     def _finish_success(self, job: dict):

@@ -51,6 +51,7 @@ pyinstaller ^
     --hidden-import=PyQt5.QtWidgets ^
     --hidden-import=PyQt5.QtGui ^
     --hidden-import=requests ^
+    --hidden-import=PIL ^
     --collect-all=vk_api ^
     --collect-all=PyQt5 ^
     main.py
