@@ -13,6 +13,8 @@ log = logging.getLogger(__name__)
 class VKGroup:
     name: str
     group_id: str
+    day_schedule: List[str] = field(default_factory=list)
+    default_text: str = ""
 
     def __post_init__(self):
         # group ids are numbers, possibly negative
@@ -20,6 +22,8 @@ class VKGroup:
             int(str(self.group_id).lstrip("-"))
         except (ValueError, TypeError):
             raise ValueError(f"Invalid group ID '{self.group_id}': must be a number")
+        if self.day_schedule is None:
+            self.day_schedule = []
 
 
 @dataclass
@@ -158,6 +162,47 @@ class VKConfigManager:
         group = token.get_group(self.selected_group)
         return group.group_id if group else None
 
+    # -- per-group schedule and default text -------------------------------
+
+    def get_group_schedule(self, token_name: str, group_name: str) -> List[str]:
+        token = self.tokens.get(token_name)
+        group = token.get_group(group_name) if token else None
+        return list(group.day_schedule) if group else []
+
+    def set_group_schedule(self, token_name: str, group_name: str, schedule: List[str]) -> None:
+        group = self._group_or_raise(token_name, group_name)
+        for t in schedule:
+            self._check_time(t)
+        group.day_schedule = list(schedule)
+        self.save()
+
+    def get_group_default_text(self, token_name: str, group_name: str) -> str:
+        group = self._find_group(token_name, group_name)
+        return group.default_text if group else ""
+
+    def set_group_default_text(self, token_name: str, group_name: str, text: str) -> None:
+        group = self._group_or_raise(token_name, group_name)
+        group.default_text = text
+        self.save()
+
+    def _find_group(self, token_name, group_name):
+        token = self.tokens.get(token_name)
+        return token.get_group(group_name) if token else None
+
+    def _group_or_raise(self, token_name, group_name):
+        group = self._find_group(token_name, group_name)
+        if not group:
+            raise ValueError(f"Group '{group_name}' not found in token '{token_name}'")
+        return group
+
+    @staticmethod
+    def _check_time(t: str) -> None:
+        try:
+            h, m = t.split(":")
+            assert 0 <= int(h) <= 23 and 0 <= int(m) <= 59
+        except (ValueError, IndexError, AssertionError):
+            raise ValueError(f"Bad time '{t}', expected HH:MM")
+
     # -- persistence ---------------------------------------------------------
 
     def load(self) -> None:
@@ -199,7 +244,8 @@ class VKConfigManager:
                 name: {
                     "token": self._secrets.get(name, ""),
                     "groups": [
-                        {"name": g.name, "group_id": g.group_id}
+                        {"name": g.name, "group_id": g.group_id,
+                         "day_schedule": g.day_schedule, "default_text": g.default_text}
                         for g in tok.groups
                     ],
                 }

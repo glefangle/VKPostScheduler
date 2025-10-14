@@ -513,6 +513,7 @@ class MainWindow(QMainWindow):
         if current_token and self.group_combo.currentText():
             self.scheduler.config.set_selection(current_token,
                                                 self.group_combo.currentText())
+            self._load_group_data()
 
     def _on_token_changed(self, token_name: str):
         if not token_name:
@@ -534,7 +535,30 @@ class MainWindow(QMainWindow):
         token_name = self.token_combo.currentText()
         if not token_name or not group_name:
             return
-        self.scheduler.config.set_selection(token_name, group_name)
+
+        config = self.scheduler.config
+        prev_token, prev_group = config.get_selection()
+        # save the edits under the group they belong to
+        if prev_token and prev_group and (prev_token, prev_group) != (token_name, group_name):
+            if self.times:
+                try:
+                    config.set_group_schedule(prev_token, prev_group, list(self.times))
+                except ValueError as e:
+                    self._log(f"Could not save schedule for {prev_group}: {e}")
+
+        config.set_selection(token_name, group_name)
+        self._load_group_data()
+
+    def _load_group_data(self):
+        token_name = self.token_combo.currentText()
+        group_name = self.group_combo.currentText()
+        if not token_name or not group_name:
+            return
+        config = self.scheduler.config
+        self.times = list(config.get_group_schedule(token_name, group_name))
+        self.times_list.clear()
+        self.times_list.addItems(self.times)
+        self.text_edit.setPlainText(config.get_group_default_text(token_name, group_name))
 
     def _token_add(self):
         dialog = TokenDialog(self, self.scheduler.config)
@@ -626,6 +650,7 @@ class MainWindow(QMainWindow):
         if t not in self.times:
             self.times.append(t)
             self.times_list.addItem(t)
+        self._save_group_schedule()
 
     def _remove_time(self):
         item = self.times_list.currentItem()
@@ -647,6 +672,18 @@ class MainWindow(QMainWindow):
         if t in self.times:
             self.times.remove(t)
         self.times_list.takeItem(self.times_list.row(item))
+        self._save_group_schedule()
+
+    def _save_group_schedule(self):
+        token_name = self.token_combo.currentText()
+        group_name = self.group_combo.currentText()
+        if not token_name or not group_name:
+            return
+        try:
+            self.scheduler.config.set_group_schedule(token_name, group_name,
+                                                     list(self.times))
+        except ValueError as e:
+            self._log(f"Schedule not saved: {e}")
 
     def _schedule(self):
         different = self.different_check.isChecked()
