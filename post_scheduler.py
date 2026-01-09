@@ -219,6 +219,7 @@ class PostScheduler:
         self.stop_flag = False
         self.pause_flag = False
         self.max_retries = 3
+        self.sleep_cancel_event = threading.Event()  # Event to cancel ongoing sleeps
         self.jobs_file = "jobs_state.json"
         self.allowed_exts = {'.jpg', '.jpeg', '.png', '.gif'}
         self.state_lock = threading.Lock()
@@ -1318,7 +1319,7 @@ class PostScheduler:
                         self._crash_log("HIGH_ERROR_RATE", f"High error rate detected: {consecutive_errors} consecutive errors")
                         # Add delay to prevent error spam, but check for resume
                         if not self.pause_flag:
-                            time.sleep(1)
+                            self._interruptible_sleep(1)
                     
                     self._crash_log("ERROR_NOTIFY_START", f"About to send error notifications for {post_time}")
                     
@@ -1346,7 +1347,10 @@ class PostScheduler:
                             self._notify_status("Queue resumed - cancelling error wait")
                             break
                             
-                        time.sleep(1)
+                        # Use interruptible sleep that can be cancelled by resume button
+                        if not self._interruptible_sleep(1):
+                            self._notify_status("Error wait period cancelled - resuming queue")
+                            break
                     
                     self._notify_status("✅ 1-minute wait completed")
                     
@@ -1398,7 +1402,10 @@ class PostScheduler:
                                     task_done_called = True
                                     return
                                 if not self.pause_flag:
-                                    time.sleep(1)
+                                    # Use interruptible sleep that can be cancelled by resume button
+                                    if not self._interruptible_sleep(1):
+                                        self._notify_status("Retry wait period cancelled - resuming queue")
+                                        break
                                 else:
                                     # Queue is paused, wait for resume
                                     while self.pause_flag and not self.stop_flag:
@@ -1421,7 +1428,10 @@ class PostScheduler:
                                     self.job_queue.task_done()
                                     task_done_called = True
                                     return
-                                time.sleep(1)
+                                # Use interruptible sleep that can be cancelled by resume button
+                                if not self._interruptible_sleep(1):
+                                    self._notify_status("Failure wait period cancelled - resuming queue")
+                                    break
                             
                             self._notify_status("✅ 1-minute wait before failure completed")
                         
@@ -1475,9 +1485,43 @@ class PostScheduler:
             'pending': pending
         }
     
+    def _interruptible_sleep(self, duration: float) -> bool:
+        """Sleep for the specified duration but can be interrupted by resume_worker or stop_flag
+        
+        Args:
+            duration: Sleep duration in seconds
+            
+        Returns:
+            bool: True if sleep completed normally, False if interrupted
+        """
+        # Clear the cancel event at the start of each sleep
+        self.sleep_cancel_event.clear()
+        
+        start_time = time.time()
+        end_time = start_time + duration
+        
+        while time.time() < end_time:
+            if self.stop_flag:
+                return False
+            
+            # Check if sleep was cancelled (resume button pressed)
+            if self.sleep_cancel_event.is_set():
+                return False
+                
+            # Check if pause flag changed (queue resumed)
+            if not self.pause_flag:
+                return False
+                
+            # Sleep in small increments (0.1s) to be responsive
+            time.sleep(0.1)
+        
+        return True
+    
     def resume_worker(self):
         """Resume worker after error"""
         self.pause_flag = False
+        # Cancel any ongoing interruptible sleeps
+        self.sleep_cancel_event.set()
         self._notify_status("▶️ Queue resumed - continuing with next posts")
     
     # Job persistence methods
@@ -1744,6 +1788,9 @@ class PostScheduler:
         
         # Clear pause flag to resume processing
         self.pause_flag = False
+        
+        # Cancel any ongoing interruptible sleeps
+        self.sleep_cancel_event.set()
         
         # Start worker if not already running
         self._start_worker_if_needed()

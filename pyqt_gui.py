@@ -639,8 +639,6 @@ class PostSchedulerPyQtGUI(QMainWindow):
         self.progress_update_signal.connect(self._update_progress_safe)
         self.error_update_signal.connect(self._handle_error_safe)
         
-        # Note: Captcha handling is done through the application core
-        # No direct captcha handler needed in GUI
         
         # Initialize variables
         self.photo_paths = []  # Changed to list for multiple files
@@ -654,7 +652,7 @@ class PostSchedulerPyQtGUI(QMainWindow):
         self.gif_transform = True
         
         self.setup_ui()
-        self.setup_connections()
+        self.setup_connections()   
         self.refresh_vk_selections()
         
         # Check for pending jobs and auto-start worker if needed
@@ -1023,7 +1021,7 @@ class PostSchedulerPyQtGUI(QMainWindow):
         bottom_layout.addStretch()
         
         # Version info
-        version_label = QLabel("VK Post Scheduler v0.9.5")
+        version_label = QLabel("VK Post Scheduler v1.0.0")
         version_label.setStyleSheet("color: #6c757d; font-size: 11px;")
         bottom_layout.addWidget(version_label)
         

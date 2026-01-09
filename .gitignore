@@ -2,6 +2,13 @@
 
 # Configuration files with sensitive data
 vk_config.json
+jobs_state.json
+
+# Exclude config files from dist folder
+dist/**/vk_config.json
+dist/**/jobs_state.json
+dist/**/*.log
+dist/**/logs/
 
 # Python
 __pycache__/
@@ -11,7 +18,7 @@ __pycache__/
 .Python
 build/
 develop-eggs/
-dist/
+dist/*
 downloads/
 eggs/
 .eggs/

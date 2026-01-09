@@ -4,109 +4,58 @@ A desktop application for scheduling posts to VK (VKontakte) groups with advance
 
 ![VK Post Scheduler Main Interface](screenshots/main_interface.png)
 
-## 📋 Table of Contents
+## Table of Contents
 
-- [Features](#-features)
-- [Installation](#-installation)
-- [Quick Start](#-quick-start)
-- [Configuration](#-configuration)
-- [Usage Guide](#-usage-guide)
-- [Advanced Features](#-advanced-features)
-- [Building Executable](#-building-executable)
-- [Technical Architecture](#-technical-architecture)
-- [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
-- [License](#-license)
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Usage Guide](#usage-guide)
+- [Advanced Features](#advanced-features)
+- [Building Executable](#building-executable)
+- [Technical Architecture](#technical-architecture)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
-## ✨ Features
+## Features
 
 ### Core Functionality
-- **📅 Schedule Posts**: Plan posts across multiple days with custom time slots
-- **🖼️ Multi-Media Support**: Upload photos, GIFs, and text posts
-- **🔄 Photo Rotation**: Automatic photo cycling with multiple rotation modes
-- **👥 Multi-Group Management**: Manage multiple VK tokens and groups
-- **⏰ Flexible Scheduling**: Custom schedules per group with default text templates
+- **Schedule Posts**: Plan posts across multiple days with custom time slots
+- **Multi-Media Support**: Upload photos, GIFs, and text posts
+- **Photo Rotation**: Automatic photo cycling with multiple rotation modes
+- **Multi-Group Management**: Manage multiple VK tokens and groups
+- **Flexible Scheduling**: Custom schedules per group with default text templates
 
 ### Advanced Features
-- **🎯 Smart Photo Management**: Different posts mode with pre-assigned photo indexing
-- **🔧 Error Recovery**: Automatic retry logic with exponential backoff
-- **⏸️ Pause/Resume**: Full control over posting queue with pause/resume functionality
-- **📊 Progress Tracking**: Real-time progress monitoring and statistics
-- **🔄 Background Processing**: Non-blocking GUI with threaded job processing
-- **💾 State Persistence**: Jobs and configuration survive application restarts
-- **🖼️ GIF transformer**: GIF transformation for VK aspect ratio requirements
+- **Smart Photo Management**: Different posts mode with pre-assigned photo indexing
+- **Error Recovery**: Automatic retry logic with exponential backoff
+- **Pause/Resume**: Full control over posting queue with pause/resume functionality
+- **Progress Tracking**: Real-time progress monitoring and statistics
+- **Background Processing**: Non-blocking GUI with threaded job processing
+- **State Persistence**: Jobs and configuration survive application restarts
+- **GIF transformer**: GIF transformation for VK aspect ratio requirements
 
 ### Technical Features
-- **🛡️ Crash Detection**: Advanced Qt crash detection and logging system
-- **📝 Comprehensive Logging**: Detailed application and API interaction logs
-- **🎨 Modern GUI**: Clean PyQt5 interface with responsive design
-- **🔒 Secure Configuration**: Safe token storage and management
-- **🚀 Performance Optimized**: Efficient memory usage and background processing
+- **Crash Detection**: Advanced Qt crash detection and logging system
+- **Comprehensive Logging**: Detailed application and API interaction logs
+- **Modern GUI**: Clean PyQt5 interface with responsive design
+- **Secure Configuration**: Safe token storage and management
+- **Performance Optimized**: Efficient memory usage and background processing
 
 
-## 📦 Installation
+## Installation
 
-### System Requirements
+## Quick Start
 
-- **Python**: 3.7 or higher
-- **Operating System**: Windows, macOS, or Linux
-- **RAM**: Minimum 512 MB (1 GB recommended)
-- **Storage**: 50 MB free space
+1. **Download the archive and run the executable from the unpacked archive**:
 
-### Method 1: Automatic Setup (Recommended)
+[VKPostScheduler_1.0.0.zip](release/VKPostScheduler_1.0.0.zip)
 
-#### Windows
-# Run the automatic setup script
-run.bat
-```
+2. **Continue with configuration** (see "Configure VK Access" below)
 
-#### Linux/macOS
-```bash
-# Make the script executable and run
-chmod +x run.sh
-./run.sh
-```
 
-### Method 2: Manual Installation
-
-1. **Create virtual environment**:
-```bash
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# Linux/macOS
-source venv/bin/activate
-```
-
-2. **Install dependencies**:
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-3. **Run the application**:
-```bash
-python main.py
-```
-
-### Dependencies
-
-The application requires the following Python packages:
-- `vk-api`: VK API integration
-- `requests>=2.28`: HTTP requests handling
-- `Pillow>=8.0.0`: Image processing
-- `PyQt5>=5.15.0`: GUI framework
-- `pyinstaller>=6.0.0`: For building standalone executables
-
-## 🚀 Quick Start
-
-### 1. First Launch
-1. Run the application using one of the installation methods above
-2. The application will create necessary configuration files on first launch
-
-### 2. Configure VK Access
+### Configure VK Access
 1. Click **"Manage Tokens & Groups"** in the main interface
 2. Add your VK access token:
    - Click **"Add Token"**
@@ -117,7 +66,7 @@ The application requires the following Python packages:
    - Click **"Add Group"**
    - Enter group name and VK group ID
 
-### 3. Create Your First Scheduled Post
+### Create Your First Scheduled Post
 1. Select your token and group from the dropdowns
 2. Enter your post text
 3. (Optional) Select photos or GIF to upload
@@ -125,12 +74,12 @@ The application requires the following Python packages:
 5. Configure posting times
 6. Click **"Schedule Posts"**
 
-### 4. Monitor Progress
+### Monitor Progress
 - View real-time posting status in the status area
 - Check progress statistics
 - Use pause/resume controls as needed
 
-## ⚙️ Configuration
+## Configuration
 
 ### Getting VK Access Token
 
@@ -168,7 +117,7 @@ The application creates several configuration files:
 - **`error.log`**: Critical error logging
 - **`crash.log`**: Application crash information
 
-## 📖 Usage Guide
+## Usage Guide
 
 ### Basic Posting
 
@@ -228,7 +177,7 @@ Set default text per group:
 - Rotation state is preserved
 - Configuration changes are saved immediately
 
-## 🔧 Advanced Features
+## Advanced Features
 
 ### Photo Rotation Systems
 
@@ -274,7 +223,58 @@ crash.log                     # Application crashes
 - Threaded job execution
 - Responsive user interface
 
-## 🔨 Building Executable
+Compiling and building:
+
+### Method 1: Automatic Setup (Recommended)
+
+#### Windows
+# Run the automatic setup script
+run.bat
+```
+
+#### Linux/macOS
+```bash
+# Make the script executable and run
+chmod +x run.sh
+./run.sh
+```
+
+### Method 2: Manual Installation
+
+1. **Create virtual environment**:
+```bash
+python -m venv venv
+
+# Windows
+venv\Scripts\activate
+
+# Linux/macOS
+source venv/bin/activate
+```
+
+2. **Install dependencies**:
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+3. **Run the application**:
+```bash
+python main.py
+```
+
+### Dependencies
+
+The application requires the following Python packages:
+- `vk-api`: VK API integration
+- `requests>=2.28`: HTTP requests handling
+- `Pillow>=8.0.0`: Image processing
+- `PyQt5>=5.15.0`: GUI framework
+- `pyinstaller>=6.0.0`: For building standalone executables
+
+
+
+## Building Executable
 
 ### Windows Executable
 
@@ -316,7 +316,7 @@ pyinstaller \
 - `--hidden-import`: Ensures modules are included
 - `--collect-all`: Includes all package files
 
-## 🏗️ Technical Architecture
+## Technical Architecture
 
 ### Project Structure
 
@@ -375,7 +375,7 @@ VkPostScheduler/
 - Atomic state updates
 - Safe GUI callback mechanisms
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -431,7 +431,7 @@ Check these log files for issues:
 - `logs/app_*.log`: Detailed application flow
 - `crash.log`: Application crashes
 
-## 🤝 Contributing
+## Contributing
 
 ### Development Setup
 
@@ -468,25 +468,25 @@ When reporting bugs, include:
 - Relevant log file contents
 - Screenshots if GUI-related
 
-## 📞 Support
 
-- **Documentation**: This README and inline code comments
-- **Issues**: Use GitHub Issues for bug reports and feature requests
-- **Discussions**: Use GitHub Discussions for questions and community support
+## Changelog
 
-## 🔄 Changelog
+### Version 1.0.0 (Current)
 
-### Version 0.9.6 (Current)
+- Major version release
+- Stable production build
 
-- 🖼️ GIF transformation for VK aspect ratio requirements
-- 🔧 GIF posting bug fixes
+### Version 0.9.6
+
+- GIF transformation for VK aspect ratio requirements
+- GIF posting bug fixes
 
 ### Version 0.9.5 
-- ✨ Complete PyQt5 GUI implementation
-- 🔄 Advanced photo rotation system
-- 🛡️ Qt crash detection and logging
-- ⏸️ Pause/resume functionality
-- 💾 Persistent job state management
-- 🎯 Different posts and same post mode with photo indexing
-- 📊 Real-time progress tracking
-- 🔧 Enhanced error handling and recovery
+- Complete PyQt5 GUI implementation
+- Advanced photo rotation system
+- Qt crash detection and logging
+- Pause/resume functionality
+- Persistent job state management
+- Different posts and same post mode with photo indexing
+- Real-time progress tracking
+- Enhanced error handling and recovery

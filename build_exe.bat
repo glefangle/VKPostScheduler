@@ -5,7 +5,7 @@ echo ========================================
 echo.
 
 REM Check if Python is available
-python --version >nul 2>&1
+py --version >nul 2>&1
 if errorlevel 1 (
     echo ERROR: Python is not installed or not in PATH
     pause
@@ -13,15 +13,15 @@ if errorlevel 1 (
 )
 
 echo Python found: 
-python --version
+py --version
 echo.
 
 REM Check if PyInstaller is installed
 echo Checking PyInstaller...
-python -c "import PyInstaller" >nul 2>&1
+py -c "import PyInstaller" >nul 2>&1
 if errorlevel 1 (
     echo PyInstaller not found. Installing...
-    pip install pyinstaller>=6.0.0
+    py -m pip install pyinstaller>=6.0.0
     if errorlevel 1 (
         echo ERROR: Failed to install PyInstaller
         pause
@@ -36,15 +36,15 @@ REM Clean previous builds
 echo Cleaning previous builds...
 if exist "dist" rmdir /s /q "dist"
 if exist "build" rmdir /s /q "build"
-if exist "*.spec" del /q "*.spec"
+REM Keep spec file - don't delete it
 echo.
 
 REM Build the executable
 echo Building executable...
-echo Command: pyinstaller --onefile --windowed --name=PostScheduler --icon=icon.ico main.py
+echo Command: py -m PyInstaller --onefile --windowed --name=PostScheduler main.py
 echo.
 
-pyinstaller ^
+py -m PyInstaller ^
     --onefile ^
     --windowed ^
     --name=PostScheduler ^
