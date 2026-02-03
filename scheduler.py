@@ -1,6 +1,5 @@
 """Job queue and worker thread; posting lives in a PostClient backend."""
 
-import json
 import logging
 import os
 import threading
@@ -12,6 +11,7 @@ from typing import Callable, List, Optional, Tuple
 
 from vk_api.exceptions import ApiError
 
+from job_store import JobStore
 from vk_client import VKClient
 from vk_config import VKConfigManager
 
@@ -40,8 +40,10 @@ class PostData:
 
 
 class PostScheduler:
-    def __init__(self, config: VKConfigManager = None, client: VKClient = None):
+    def __init__(self, config: VKConfigManager = None, store: JobStore = None,
+                 client: VKClient = None):
         self.config = config or VKConfigManager()
+        self.store = store or JobStore()
         self.client = client or VKClient()
 
         self.queue: Queue = Queue()
@@ -57,8 +59,6 @@ class PostScheduler:
         self._ok = 0
         self._failed = 0
         self._last_status_at = 0.0
-
-        self._state_file = "jobs_state.json"
 
     # -- scheduling -----------------------------------------------------------
 
@@ -96,7 +96,7 @@ class PostScheduler:
         self._throw_out_plan()
         if post.different_posts:
             # restart the photo rotation for each new plan
-            self._reset_rotation(ROTATION_KEY)
+            self.store.reset_rotation(ROTATION_KEY)
 
         token_name, group_name = self.config.get_selection()
         jobs, exhausted = self._build_jobs(post, start_date, end_date, times,
@@ -104,7 +104,7 @@ class PostScheduler:
         if not jobs:
             return False, "Nothing to schedule."
 
-        self._add_jobs(jobs)
+        self.store.add_jobs(jobs)
         for job in jobs:
             self.queue.put(job)
         self._total = len(jobs)
@@ -123,7 +123,7 @@ class PostScheduler:
         exhausted = False
         photo_idx = None
         if post.different_posts and post.photo_paths:
-            photo_idx = self._get_rotation(ROTATION_KEY) + 1
+            photo_idx = self.store.get_rotation(ROTATION_KEY) + 1
 
         start = datetime.strptime(start_date, "%Y-%m-%d").date()
         end = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -155,11 +155,11 @@ class PostScheduler:
             day += timedelta(days=1)
 
         if photo_idx is not None:
-            self._set_rotation(ROTATION_KEY, photo_idx - 1)
+            self.store.set_rotation(ROTATION_KEY, photo_idx - 1)
         return jobs, exhausted
 
     def _throw_out_plan(self):
-        self._clear_state_jobs()
+        self.store.clear_jobs()
         while True:
             try:
                 self.queue.get_nowait()
@@ -173,7 +173,7 @@ class PostScheduler:
 
     def reload_pending(self) -> int:
         """Load persisted jobs back into the queue after a restart."""
-        jobs = self._load_jobs()
+        jobs = self.store.load_jobs()
         for job in jobs:
             job.setdefault("attempt", 0)
             self.queue.put(job)
@@ -185,7 +185,7 @@ class PostScheduler:
         """Drop one job; queued copies are marked cancelled."""
         if not post_time:
             return False
-        removed = self._remove_state_job(post_time)
+        removed = self.store.remove_by_post_time(post_time)
         if removed:
             self._progress()
         return removed
@@ -242,7 +242,7 @@ class PostScheduler:
     def current_jobs(self) -> List[dict]:
         """Pending jobs with display info for the status tab."""
         result = []
-        for job in self._load_jobs():
+        for job in self.store.load_jobs():
             info = {
                 "post_time": job.get("post_time", "?"),
                 "attempt": job.get("attempt", 0),
@@ -262,7 +262,7 @@ class PostScheduler:
         return result
 
     def stats(self) -> dict:
-        pending = len(self._load_jobs())
+        pending = self.store.pending_count()
         done = self._ok + self._failed
         return {
             "total": max(self._total, done + pending),
@@ -353,7 +353,7 @@ class PostScheduler:
         raise ValueError(f"{path}: unsupported file type {ext}")
 
     def _finish_success(self, job: dict):
-        self._remove_state_job(job["post_time"])
+        self.store.remove_by_post_time(job["post_time"])
         self._ok += 1
         self._status(f"Posted {job['post_time']} to {job.get('group_name', '?')}")
         self._progress()
@@ -395,7 +395,7 @@ class PostScheduler:
         return "ok"
 
     def _fail_job(self, job: dict, message: str):
-        self._remove_state_job(job["post_time"])
+        self.store.remove_by_post_time(job["post_time"])
         self._failed += 1
         self._status(message, important=True)
         self._progress()
@@ -422,67 +422,6 @@ class PostScheduler:
             time.sleep(1)
             left -= 1
         return "ok"
-
-
-    def _load_state(self) -> dict:
-        if not os.path.exists(self._state_file):
-            return {}
-        try:
-            with open(self._state_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else {}
-        except (json.JSONDecodeError, OSError, ValueError) as e:
-            log.error("cannot read %s: %s", self._state_file, e)
-            return {}
-
-    def _save_state(self, data: dict) -> None:
-        try:
-            with open(self._state_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except OSError as e:
-            log.error("failed to write %s: %s", self._state_file, e)
-
-    def _load_jobs(self) -> List[dict]:
-        return self._load_state().get("jobs", [])
-
-    def _save_jobs(self, jobs: List[dict]) -> None:
-        data = self._load_state()
-        data["jobs"] = jobs
-        self._save_state(data)
-
-    def _add_jobs(self, new_jobs: List[dict]) -> None:
-        if not new_jobs:
-            return
-        jobs = self._load_jobs()
-        jobs.extend(new_jobs)
-        self._save_jobs(jobs)
-
-    def _remove_state_job(self, post_time: str) -> bool:
-        jobs = self._load_jobs()
-        rest = [j for j in jobs if j.get("post_time") != post_time]
-        if len(rest) == len(jobs):
-            return False
-        self._save_jobs(rest)
-        return True
-
-    def _clear_state_jobs(self) -> None:
-        data = self._load_state()
-        data["jobs"] = []
-        self._save_state(data)
-
-    def _get_rotation(self, key: str) -> int:
-        return self._load_state().get("rotations", {}).get(key, {}).get("last_index", -1)
-
-    def _set_rotation(self, key: str, last_index: int) -> None:
-        data = self._load_state()
-        data.setdefault("rotations", {}).setdefault(key, {})["last_index"] = last_index
-        self._save_state(data)
-
-    def _reset_rotation(self, key: str) -> None:
-        data = self._load_state()
-        if key in data.get("rotations", {}):
-            del data["rotations"][key]
-            self._save_state(data)
 
     # -- gui hooks ----------------------------------------------------------------
 
