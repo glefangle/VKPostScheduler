@@ -58,6 +58,9 @@ class PostScheduler:
 
         self._worker_thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
+        # bumped on plan replacement; old-plan jobs still queued are dropped
+        self._generation = 0
+        self._cancelled_post_times = set()
 
         self._total = 0
         self._ok = 0
@@ -148,6 +151,7 @@ class PostScheduler:
                         "gif_transform": post.gif_transform,
                     },
                     "sleep_time": post.sleep_time,
+                    "generation": self._generation,
                 }
                 if photo_idx is not None:
                     if photo_idx >= len(post.photo_paths):
@@ -163,6 +167,8 @@ class PostScheduler:
         return jobs, exhausted
 
     def _throw_out_plan(self):
+        self._generation += 1
+        self._cancelled_post_times.clear()
         self.store.clear_jobs()
         while True:
             try:
@@ -180,6 +186,7 @@ class PostScheduler:
         jobs = self.store.load_jobs()
         for job in jobs:
             job.setdefault("attempt", 0)
+            job.setdefault("generation", self._generation)
             self.queue.put(job)
         if jobs:
             self._total = len(jobs)
@@ -189,6 +196,7 @@ class PostScheduler:
         """Drop one job; queued copies are marked cancelled."""
         if not post_time:
             return False
+        self._cancelled_post_times.add(post_time)
         removed = self.store.remove_by_post_time(post_time)
         if removed:
             self._progress()
@@ -289,6 +297,9 @@ class PostScheduler:
             except Empty:
                 continue
 
+            if self._is_stale(job):
+                continue
+
             try:
                 self._execute(job)
             except Exception as e:
@@ -300,6 +311,17 @@ class PostScheduler:
             if not self._stop.is_set() and not self._pause.is_set():
                 time.sleep(max(0, job.get("sleep_time", 1)))
         log.info("worker stopped")
+
+    def _is_stale(self, job: dict) -> bool:
+        if job.get("generation", self._generation) != self._generation:
+            log.debug("dropping stale job %s", job.get("post_time"))
+            return True
+        post_time = job.get("post_time")
+        if post_time in self._cancelled_post_times:
+            self._cancelled_post_times.discard(post_time)
+            log.debug("dropping cancelled job %s", post_time)
+            return True
+        return False
 
     def _execute(self, job: dict):
         post_time = job["post_time"]
