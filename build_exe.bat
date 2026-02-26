@@ -54,6 +54,7 @@ pyinstaller ^
     --hidden-import=PIL ^
     --collect-all=vk_api ^
     --collect-all=PyQt5 ^
+    --collect-all=keyring ^
     main.py
 
 if errorlevel 1 (
