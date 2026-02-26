@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -19,6 +20,9 @@ log = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
 ERROR_WAIT = 60  # the pause gives the error dialog time to be read
+
+# retrying never hepls: auth, access, blocked app, invalid params
+PERMANENT_VK_CODES = {5, 7, 8, 15, 100}
 
 PHOTO_EXTS = (".jpg", ".jpeg", ".png")
 ROTATION_KEY = "user_photos"
@@ -372,6 +376,11 @@ class PostScheduler:
             "error": f"{type(error).__name__}: {error}",
         }
 
+        if self._is_permanent(error):
+            self._fail_job(job, f"Giving up on {post_time}, the error is not "
+                                f"retryable: {error}")
+            return "ok"
+
         # pause and tell the user; resuming skips the wait
         self._pause.set()
         self._status(f"Error on {post_time}: {error}", important=True)
@@ -399,6 +408,24 @@ class PostScheduler:
         self._failed += 1
         self._status(message, important=True)
         self._progress()
+
+    @staticmethod
+    def _is_permanent(error: Exception) -> bool:
+        if isinstance(error, (PublishTimeInPastError, FileNotFoundError)):
+            return True
+        if isinstance(error, ValueError):
+            # bad parameters, missing group/token, unsupported file type
+            return True
+        if isinstance(error, ApiError):
+            code = None
+            err_data = getattr(error, "error", None)
+            if isinstance(err_data, dict):
+                code = err_data.get("error_code")
+            if code is None:
+                m = re.search(r"\[(\d+)\]", str(error))
+                code = int(m.group(1)) if m else None
+            return code in PERMANENT_VK_CODES
+        return False
 
     def _wait_while_paused(self, seconds: int) -> str:
         """Hold while paused, at most seconds; the error dialog's grace period."""
