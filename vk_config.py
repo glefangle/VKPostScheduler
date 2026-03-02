@@ -107,6 +107,8 @@ class VKToken:
     def update_group(self, old_name: str, new_group: VKGroup) -> bool:
         for i, g in enumerate(self.groups):
             if g.name == old_name:
+                if any(other.name == new_group.name for other in self.groups if other is not g):
+                    raise ValueError(f"Group '{new_group.name}' already exists")
                 self.groups[i] = new_group
                 return True
         return False
