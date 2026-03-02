@@ -6,7 +6,55 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+import keyring
+
 log = logging.getLogger(__name__)
+
+KEYRING_SERVICE = "VKPostScheduler"
+CONFIG_VERSION = 2
+
+
+class ConfigError(Exception):
+    pass
+
+
+class KeyringStore:
+    """Secret storage backed by the OS credential store."""
+
+    def get(self, name: str) -> Optional[str]:
+        try:
+            return keyring.get_password(KEYRING_SERVICE, name)
+        except keyring.errors.KeyringError as e:
+            raise ConfigError(f"Cannot read token '{name}' from the credential store: {e}") from e
+
+    def set(self, name: str, secret: str) -> None:
+        try:
+            keyring.set_password(KEYRING_SERVICE, name, secret)
+        except keyring.errors.KeyringError as e:
+            raise ConfigError(f"Cannot save token '{name}' to the credential store: {e}") from e
+
+    def delete(self, name: str) -> None:
+        try:
+            keyring.delete_password(KEYRING_SERVICE, name)
+        except keyring.errors.KeyringError:
+            # deleting a missing entry is fine
+            log.debug("keyring delete failed for %s", name, exc_info=True)
+
+
+class MemoryStore:
+    """In-memory store, used by tests."""
+
+    def __init__(self):
+        self.secrets: Dict[str, str] = {}
+
+    def get(self, name: str) -> Optional[str]:
+        return self.secrets.get(name)
+
+    def set(self, name: str, secret: str) -> None:
+        self.secrets[name] = secret
+
+    def delete(self, name: str) -> None:
+        self.secrets.pop(name, None)
 
 
 @dataclass
@@ -32,7 +80,10 @@ class VKToken:
     groups: List[VKGroup] = field(default_factory=list)
 
     def __post_init__(self):
-        if self.groups is None:
+        # tolerate groups loaded from the old json format
+        if self.groups and isinstance(self.groups[0], dict):
+            self.groups = [VKGroup(**g) for g in self.groups]
+        elif self.groups is None:
             self.groups = []
 
     def add_group(self, group: VKGroup) -> None:
@@ -62,10 +113,10 @@ class VKToken:
 
 
 class VKConfigManager:
-    def __init__(self, config_file: str = "vk_config.json"):
+    def __init__(self, config_file: str = "vk_config.json", secrets: Optional[object] = None):
         self.config_file = config_file
+        self.secrets = secrets or KeyringStore()
         self.tokens: Dict[str, VKToken] = {}
-        self._secrets: Dict[str, str] = {}
         self.selected_token: Optional[str] = None
         self.selected_group: Optional[str] = None
         self.load()
@@ -75,7 +126,7 @@ class VKConfigManager:
     def add_token(self, name: str, value: str) -> None:
         if name in self.tokens:
             raise ValueError(f"Token '{name}' already exists")
-        self._secrets[name] = value
+        self.secrets.set(name, value)
         self.tokens[name] = VKToken(name=name)
         self.save()
 
@@ -87,13 +138,16 @@ class VKConfigManager:
                 raise ValueError(f"Token '{new_name}' already exists")
 
         if new_value is not None:
-            self._secrets[new_name] = new_value
+            self.secrets.set(new_name, new_value)
             if old_name != new_name:
-                self._secrets.pop(old_name, None)
+                self.secrets.delete(old_name)
         elif old_name != new_name:
-            if old_name not in self._secrets:
-                raise ValueError(f"Token value for '{old_name}' is missing")
-            self._secrets[new_name] = self._secrets.pop(old_name)
+            # rename only: rehang the secret under the new name
+            value = self.secrets.get(old_name)
+            if value is None:
+                raise ConfigError(f"Token value for '{old_name}' is missing from the credential store")
+            self.secrets.set(new_name, value)
+            self.secrets.delete(old_name)
 
         token = self.tokens.pop(old_name)
         token.name = new_name
@@ -106,7 +160,7 @@ class VKConfigManager:
         if name not in self.tokens:
             return False
         del self.tokens[name]
-        self._secrets.pop(name, None)
+        self.secrets.delete(name)
         if self.selected_token == name:
             self.selected_token = None
             self.selected_group = None
@@ -126,7 +180,7 @@ class VKConfigManager:
     def token_value(self, name: str) -> Optional[str]:
         if name not in self.tokens:
             return None
-        return self._secrets.get(name)
+        return self.secrets.get(name)
 
     # -- selection ---------------------------------------------------------
 
@@ -222,13 +276,16 @@ class VKConfigManager:
             self.save()
             return
 
+        tokens_data = data.get("tokens", {})
+        migrated = False
         self.tokens = {}
-        self._secrets = {}
-        for name, tok in data.get("tokens", {}).items():
+        for name, tok in tokens_data.items():
+            if "token" in tok:  # pre-keyring format, move the secret out
+                self.secrets.set(name, tok["token"])
+                del tok["token"]
+                migrated = True
             groups = [VKGroup(**g) for g in tok.get("groups", [])]
             self.tokens[name] = VKToken(name=name, groups=groups)
-            if "token" in tok:
-                self._secrets[name] = tok["token"]
 
         self.selected_token = data.get("selected_token")
         self.selected_group = data.get("selected_group")
@@ -236,19 +293,20 @@ class VKConfigManager:
             self.selected_token = None
             self.selected_group = None
 
+        if migrated:
+            log.info("moved stored tokens into the OS credential store")
+
         self.save()
 
     def save(self) -> None:
         data = {
+            "version": CONFIG_VERSION,
             "tokens": {
-                name: {
-                    "token": self._secrets.get(name, ""),
-                    "groups": [
-                        {"name": g.name, "group_id": g.group_id,
-                         "day_schedule": g.day_schedule, "default_text": g.default_text}
-                        for g in tok.groups
-                    ],
-                }
+                name: {"groups": [
+                    {"name": g.name, "group_id": g.group_id,
+                     "day_schedule": g.day_schedule, "default_text": g.default_text}
+                    for g in tok.groups
+                ]}
                 for name, tok in self.tokens.items()
             },
             "selected_token": self.selected_token,
