@@ -270,11 +270,7 @@ class VKConfigManager:
             with open(self.config_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (json.JSONDecodeError, OSError) as e:
-            log.error("config %s is unreadable: %s", self.config_file, e)
-            self.tokens = {}
-            self._secrets = {}
-            self.selected_token = None
-            self.selected_group = None
+            self._backup_broken_file(e)
             self.save()
             return
 
@@ -282,12 +278,16 @@ class VKConfigManager:
         migrated = False
         self.tokens = {}
         for name, tok in tokens_data.items():
-            if "token" in tok:  # pre-keyring format, move the secret out
-                self.secrets.set(name, tok["token"])
-                del tok["token"]
-                migrated = True
-            groups = [VKGroup(**g) for g in tok.get("groups", [])]
-            self.tokens[name] = VKToken(name=name, groups=groups)
+            try:
+                if "token" in tok:  # pre-keyring format, move the secret out
+                    self.secrets.set(name, tok["token"])
+                    del tok["token"]
+                    migrated = True
+                groups = [VKGroup(**g) for g in tok.get("groups", [])]
+                self.tokens[name] = VKToken(name=name, groups=groups)
+            except (TypeError, ValueError) as e:
+                # one bad entry shouldn't sink the rest
+                log.error("skipping malformed token %r: %s", name, e)
 
         self.selected_token = data.get("selected_token")
         self.selected_group = data.get("selected_group")
@@ -314,5 +314,24 @@ class VKConfigManager:
             "selected_token": self.selected_token,
             "selected_group": self.selected_group,
         }
-        with open(self.config_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        tmp = self.config_file + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.config_file)
+        except OSError as e:
+            log.error("failed to save %s: %s", self.config_file, e)
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+    def _backup_broken_file(self, error: Exception) -> None:
+        backup = self.config_file + ".corrupt.bak"
+        log.error("config %s is unreadable (%s), backed up to %s",
+                  self.config_file, error, backup)
+        try:
+            os.replace(self.config_file, backup)
+        except OSError:
+            pass

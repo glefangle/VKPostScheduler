@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import threading
-from typing import List
+from typing import List, Optional
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +20,14 @@ class JobStore:
 
     def load_jobs(self) -> List[dict]:
         with self.lock:
-            return self._read().get("jobs", [])
+            data = self._read()
+            raw = data.get("jobs", [])
+            # skip junk rows instead of letting one stall the queue
+            jobs = [j for j in raw
+                    if isinstance(j, dict) and isinstance(j.get("post_time"), str) and j.get("post_time")]
+            if len(jobs) != len(raw):
+                log.warning("dropped %d malformed job(s) from %s", len(raw) - len(jobs), self.path)
+            return jobs
 
     def save_jobs(self, jobs: List[dict]) -> None:
         with self.lock:
@@ -82,12 +89,25 @@ class JobStore:
                 data = json.load(f)
             return data if isinstance(data, dict) else {}
         except (json.JSONDecodeError, OSError, ValueError) as e:
-            log.error("cannot read %s: %s", self.path, e)
+            backup = self.path + ".corrupt.bak"
+            log.error("%s is unreadable (%s), backed up to %s, starting empty",
+                      self.path, e, backup)
+            try:
+                os.replace(self.path, backup)
+            except OSError:
+                pass
             return {}
 
     def _write(self, data: dict) -> None:
+        tmp = self.path + ".tmp"
         try:
-            with open(self.path, "w", encoding="utf-8") as f:
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.path)
         except OSError as e:
             log.error("failed to write %s: %s", self.path, e)
+            if os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
