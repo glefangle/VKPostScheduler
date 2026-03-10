@@ -10,3 +10,4 @@ build/
 vk_config.json
 jobs_state.json
 logs/
+.pytest_cache/
