@@ -70,3 +70,12 @@ def test_cleanup_removes_files_inside_temp_dir(tmp_path, monkeypatch):
     make_gif(str(path), (10, 10))
     GIFTransformer().cleanup(str(path))
     assert not path.exists()
+
+
+def test_cleanup_refuses_paths_outside_temp_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "base"))
+    keep = tmp_path / "elsewhere" / "keep.gif"
+    keep.parent.mkdir()
+    make_gif(str(keep), (10, 10))
+    GIFTransformer().cleanup(str(keep))
+    assert keep.exists()
