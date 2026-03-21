@@ -152,3 +152,29 @@ def test_publish_ts_past(sched):
 def vk_error(code):
     return ApiError(None, "wall.post", {}, None,
                     {"error_code": code, "error_msg": "test"})
+
+
+def test_permanent_vk_codes():
+    assert PERMANENT_VK_CODES == {5, 7, 8, 15, 100}
+    for code in (5, 7, 8, 15, 100):
+        assert PostScheduler._is_permanent(vk_error(code)) is True
+
+
+def test_retryable_vk_codes():
+    # captcha, rate limit, flood control
+    for code in (6, 9, 14, 29):
+        assert PostScheduler._is_permanent(vk_error(code)) is False
+
+
+def test_permanent_non_vk_errors():
+    assert PostScheduler._is_permanent(PublishTimeInPastError("past")) is True
+    assert PostScheduler._is_permanent(FileNotFoundError("gone.jpg")) is True
+    assert PostScheduler._is_permanent(ValueError("bad file type")) is True
+    assert PostScheduler._is_permanent(RuntimeError("network flake")) is False
+
+
+def test_media_for_prefers_photo_index(sched):
+    post_data = {"photo_paths": ["a.jpg", "b.jpg"], "photo_path": "a.jpg"}
+    assert sched._media_for({"photo_index": 1}, post_data) == "b.jpg"
+    assert sched._media_for({}, post_data) == "a.jpg"
+    assert sched._media_for({"photo_index": 9}, post_data) == "a.jpg"
