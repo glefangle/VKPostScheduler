@@ -74,3 +74,81 @@ def test_build_jobs_different_posts(sched):
     assert [j["photo_index"] for j in jobs] == [0, 1, 2]
     assert sched.store.get_rotation(ROTATION_KEY) == 2
     assert all(j["token_name"] == "t1" and j["group_name"] == "g1" for j in jobs)
+
+
+def test_build_jobs_normal_mode(sched):
+    post = make_post(photo_path="one.jpg")
+    jobs, exhausted = sched._build_jobs(post, "2099-01-01", "2099-01-02", ["09:00"],
+                                        "t1", "g1")
+    assert len(jobs) == 2
+    assert exhausted is False
+    assert all("photo_index" not in j for j in jobs)
+
+
+def test_build_jobs_carries_settings(sched):
+    post = make_post(text="t", gif_name="cat.gif", gif_transform=False, sleep_time=5)
+    jobs, _ = sched._build_jobs(post, "2099-01-01", "2099-01-01", ["09:00"], "t1", "g1")
+    job = jobs[0]
+    assert job["post_data"]["gif_transform"] is False
+    assert job["post_data"]["gif_name"] == "cat.gif"
+    assert job["sleep_time"] == 5
+    assert job["generation"] == sched._generation
+
+
+def test_schedule_replaces_previous_plan(sched):
+    ok, err = sched.schedule(make_post(), "2099-01-01", "2099-01-01", ["09:00", "10:00"])
+    assert (ok, err) == (True, None)
+    assert sched.store.pending_count() == 2
+
+    ok, err = sched.schedule(make_post(), "2099-02-01", "2099-02-01", ["09:00"])
+    assert ok is True
+    jobs = sched.store.load_jobs()
+    assert [j["post_time"] for j in jobs] == ["2099-02-01 09:00"]
+    assert sched.stats()["pending"] == 1
+
+
+def test_schedule_rejects_bad_input(sched):
+    ok, err = sched.schedule(make_post(), "2026-05-02", "2026-05-01", ["09:00"])
+    assert ok is False
+    assert err
+
+
+def test_schedule_rotation_restarts_for_new_plan(sched):
+    post = make_post(photo_paths=["a.jpg"], different_posts=True)
+    sched.schedule(post, "2099-01-01", "2099-01-01", ["09:00"])
+    assert sched.store.get_rotation(ROTATION_KEY) == 0
+    sched.schedule(post, "2099-01-02", "2099-01-02", ["09:00"])
+    jobs = sched.store.load_jobs()
+    assert jobs[0]["photo_index"] == 0
+
+
+
+def test_cancel_job_marks_and_removes(sched):
+    sched.schedule(make_post(), "2099-01-01", "2099-01-01", ["09:00"])
+    assert sched.cancel_job("2099-01-01 09:00") is True
+    assert sched.cancel_job("2099-01-01 09:00") is False
+    assert sched.store.pending_count() == 0
+    assert sched._is_stale({"post_time": "2099-01-01 09:00"}) is True
+
+
+def test_is_stale_generation(sched):
+    fresh = {"post_time": "2099-01-01 09:00", "generation": sched._generation}
+    stale = {"post_time": "2099-01-01 09:00", "generation": sched._generation - 1}
+    assert sched._is_stale(fresh) is False
+    assert sched._is_stale(stale) is True
+
+
+
+def test_publish_ts_future(sched):
+    ts = sched._publish_ts("2099-01-01 09:00")
+    assert ts > int(datetime.now().timestamp())
+
+
+def test_publish_ts_past(sched):
+    with pytest.raises(PublishTimeInPastError):
+        sched._publish_ts("2020-01-01 09:00")
+
+
+def vk_error(code):
+    return ApiError(None, "wall.post", {}, None,
+                    {"error_code": code, "error_msg": "test"})
