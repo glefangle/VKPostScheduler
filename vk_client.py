@@ -61,8 +61,7 @@ class VKClient:
             resp.raise_for_status()
             doc_data = resp.json()
 
-            saved = api.docs.save(file=doc_data["file"],
-                                  title=title or os.path.basename(path))
+            saved = api.docs.save(file=doc_data["file"], title=title or os.path.basename(path))
             doc = saved["doc"]
             log.info("uploaded gif %s as doc%d_%d",
                      os.path.basename(path), doc["owner_id"], doc["id"])

@@ -18,11 +18,10 @@ from vk_config import VKConfigManager
 
 log = logging.getLogger(__name__)
 
-MAX_RETRIES = 3
-ERROR_WAIT = 60  # the pause gives the error dialog time to be read
-
 # retrying never hepls: auth, access, blocked app, invalid params
 PERMANENT_VK_CODES = {5, 7, 8, 15, 100}
+MAX_RETRIES = 3
+ERROR_WAIT = 60  # the pause gives the error dialog time to be read
 
 PHOTO_EXTS = (".jpg", ".jpeg", ".png")
 ROTATION_KEY = "user_photos"

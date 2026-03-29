@@ -98,7 +98,8 @@ class TokenDialog(QDialog):
             return
         try:
             if self.token_name:
-                self.config.update_token(self.token_name, name, value)
+                self.config.update_token(self.token_name, name,
+                                         value if value else None)
             else:
                 self.config.add_token(name, value)
         except Exception as e:
