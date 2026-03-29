@@ -12,7 +12,7 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo Python found:
+echo Python found: 
 python --version
 echo.
 
@@ -41,6 +41,9 @@ echo.
 
 REM Build the executable
 echo Building executable...
+echo Command: pyinstaller --onefile --windowed --name=PostScheduler --icon=icon.ico main.py
+echo.
+
 pyinstaller ^
     --onefile ^
     --windowed ^
@@ -71,5 +74,23 @@ echo Build completed successfully!
 echo ========================================
 echo.
 echo Executable location: dist\PostScheduler.exe
+echo File size:
+for %%A in ("dist\PostScheduler.exe") do echo %%~zA bytes
+
+REM Test if the executable exists
+if exist "dist\PostScheduler.exe" (
+    echo.
+    echo Build verification: SUCCESS
+    echo.
+    echo You can now run the standalone executable:
+    echo   dist\PostScheduler.exe
+    echo.
+    echo Or copy it to any Windows computer and run it without Python installed.
+) else (
+    echo.
+    echo Build verification: FAILED
+    echo The executable was not created successfully.
+)
+
 echo.
 pause
