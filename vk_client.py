@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Optional
+from typing import Dict, Optional
 
 import requests
 import vk_api
@@ -11,21 +11,27 @@ from gif_transformer import GIFTransformer
 
 log = logging.getLogger(__name__)
 
+UPLOAD_TIMEOUT = (10, 300)  # (connect, read); big gifs read slowly, be generous
+
 
 class VKClient:
     def __init__(self):
         self.gif = GIFTransformer()
+        self._sessions: Dict[str, object] = {}
 
     def api_for(self, token: str):
         """Authenticated api object per token, cached."""
-        return vk_api.VkApi(token=token).get_api()
+        if token not in self._sessions:
+            session = vk_api.VkApi(token=token)
+            self._sessions[token] = session.get_api()
+        return self._sessions[token]
 
     # -- uploading --------------------------------------------------------
 
     def upload_photo(self, api, path: str, group_id: int) -> str:
         server = api.photos.getWallUploadServer(group_id=group_id)
         with open(path, "rb") as fh:
-            resp = requests.post(server["upload_url"], files={"photo": fh})
+            resp = requests.post(server["upload_url"], files={"photo": fh}, timeout=UPLOAD_TIMEOUT)
         resp.raise_for_status()
         photo = resp.json()
 
@@ -51,7 +57,7 @@ class VKClient:
             # no group_id on purpose, see the VK docs for docs.getWallUploadServer
             server = api.docs.getWallUploadServer()
             with open(actual_path, "rb") as fh:
-                resp = requests.post(server["upload_url"], files={"file": fh})
+                resp = requests.post(server["upload_url"], files={"file": fh}, timeout=UPLOAD_TIMEOUT)
             resp.raise_for_status()
             doc_data = resp.json()
 
