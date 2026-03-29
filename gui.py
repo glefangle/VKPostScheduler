@@ -1,5 +1,6 @@
 """PyQt interface for the scheduler."""
 
+import html
 import logging
 import os
 from datetime import datetime
@@ -746,7 +747,8 @@ class MainWindow(QMainWindow):
 
     def _log(self, message: str):
         stamp = datetime.now().strftime("%H:%M:%S")
-        self.log_view.append(f"[{stamp}] {message}")
+        # escape angle brackets, qt would eat them
+        self.log_view.append(f"[{stamp}] {html.escape(message)}")
         self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())
 
     def _refresh_progress(self):
