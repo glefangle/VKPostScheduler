@@ -1,13 +1,58 @@
-venv/
+# ===== Python =====
 __pycache__/
-*.pyc
-.idea/
-dist/
+*.py[cod]
+*$py.class
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ===== Virtual environments =====
+venv/
+.venv/
+env/
+ENV/
+
+# ===== PyInstaller build output =====
+# build/    - intermediate build folder
+# dist/     - folder with the finished .exe
+# *.spec    - generated spec file
+# *.exe     - compiled executables (including ones outside dist/)
 build/
+dist/
 *.spec
 *.manifest
 *.exe
+
+# ===== Test / coverage =====
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+.cache
+
+# ===== App runtime files =====
+logs/
+*.log
+crash.log
 vk_config.json
 jobs_state.json
-logs/
-.pytest_cache/
+
+# ===== IDE =====
+.idea/
+.vscode/
+.qtcreator/
+*.swp
+*.swo
+*~
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
