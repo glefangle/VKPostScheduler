@@ -101,3 +101,28 @@ def clean():
         full = os.path.join(ROOT, path)
         if os.path.isdir(full):
             subprocess.run(["rmdir", "/s", "/q", full], shell=True, cwd=ROOT)
+
+
+def build():
+    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", SPEC_PATH]
+    result = subprocess.run(cmd, cwd=ROOT)
+    if result.returncode != 0:
+        print("\nBUILD FAILED, see output above")
+        return 1
+
+    exe = os.path.join(ROOT, "dist", APP_NAME + ".exe")
+    if not os.path.exists(exe):
+        print("\nBUILD FAILED: %s not found" % exe)
+        return 1
+
+    size_mb = os.path.getsize(exe) / (1024 * 1024)
+    print("\n" + "=" * 50)
+    print("  Build OK: dist\\%s.exe  (%.1f MB)" % (APP_NAME, size_mb))
+    print("=" * 50)
+    return 0
+
+
+if __name__ == "__main__":
+    clean()
+    write_spec()
+    sys.exit(build())
