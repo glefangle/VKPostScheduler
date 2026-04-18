@@ -12,9 +12,11 @@ log = logging.getLogger(__name__)
 
 
 class GIFTransformer:
-    def __init__(self):
-        self.min_ratio = 0.66
-        self.max_ratio = 2.5
+    def __init__(self, min_ratio: float, max_ratio: float, tag: str = "fixed"):
+        self.min_ratio = min_ratio
+        self.max_ratio = max_ratio
+        # keeps temp output names apart between clients
+        self.tag = tag
 
     def compliant(self, width: int, height: int) -> bool:
         if not height:
@@ -66,7 +68,7 @@ class GIFTransformer:
 
             tmp_dir = tempfile.mkdtemp()
             base = os.path.splitext(os.path.basename(path))[0]
-            out_path = os.path.join(tmp_dir, f"{base}_vk.gif")
+            out_path = os.path.join(tmp_dir, f"{base}_{self.tag}.gif")
 
             frames = []
             durations = []
@@ -137,7 +139,7 @@ class GIFTransformer:
                     "width": w,
                     "height": h,
                     "aspect_ratio": round(w / h, 2),
-                    "vk_compliant": self.compliant(w, h),
+                    "compliant": self.compliant(w, h),
                     "frames": getattr(img, "n_frames", 1),
                 }
         except Exception as e:
