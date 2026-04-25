@@ -14,7 +14,7 @@ from vk_api.exceptions import ApiError
 
 from job_store import JobStore
 from vk_client import VKClient
-from vk_config import VKConfigManager
+from config import ConfigManager
 
 log = logging.getLogger(__name__)
 
@@ -43,9 +43,9 @@ class PostData:
 
 
 class PostScheduler:
-    def __init__(self, config: VKConfigManager = None, store: JobStore = None,
+    def __init__(self, config: ConfigManager = None, store: JobStore = None,
                  client: VKClient = None):
-        self.config = config or VKConfigManager()
+        self.config = config or ConfigManager("vk_config.json")
         self.store = store or JobStore()
         self.client = client or VKClient()
 

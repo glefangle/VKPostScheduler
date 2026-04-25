@@ -15,9 +15,14 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QFont
 
+from config import Group
 from scheduler import PostData, PostScheduler
 
 log = logging.getLogger(__name__)
+
+APP_TITLE = "VK Post Scheduler"
+APP_VERSION = "1.1.0"
+GIF_TRANSFORM_LABEL = "Transform GIFs to VK limits (0.66:1 - 2.5:1)"
 
 BUTTON = """
 QPushButton {
@@ -137,18 +142,22 @@ class GroupDialog(QDialog):
         layout.addWidget(buttons)
 
     def _save(self):
-        from vk_config import VKGroup
-
         name = self.name_edit.text().strip()
         gid = self.id_edit.text().strip()
         if not name or not gid:
             QMessageBox.warning(self, "Check input", "Name and group ID are both required.")
             return
+        # group ids are numbers, possibly negative
+        try:
+            int(gid.lstrip("-"))
+        except ValueError:
+            QMessageBox.warning(self, "Check input", "Group ID must be a number.")
+            return
         try:
             if self.group_name:
-                self.token.update_group(self.group_name, VKGroup(name, gid))
+                self.token.update_group(self.group_name, Group(name, gid))
             else:
-                self.token.add_group(VKGroup(name, gid))
+                self.token.add_group(Group(name, gid))
         except Exception as e:
             QMessageBox.critical(self, "Error", str(e))
             return
@@ -233,7 +242,7 @@ class MainWindow(QMainWindow):
         self.progress_sig.connect(self._refresh_progress)
         self.error_sig.connect(self._show_error)
 
-        self.setWindowTitle("VK Post Scheduler")
+        self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(1000, 680)
         self._apply_style()
         self._build_ui()
@@ -297,7 +306,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self._schedule_tab(), "Schedule")
         self.tabs.addTab(self._status_tab(), "Status")
 
-        footer = QLabel("VK Post Scheduler v1.0.0")
+        footer = QLabel(f"{APP_TITLE} v{APP_VERSION}")
         footer.setStyleSheet("color: #6c757d; font-size: 11px;")
         root.addWidget(footer, 0, Qt.AlignRight)
 
@@ -354,8 +363,7 @@ class MainWindow(QMainWindow):
         gif_row.addWidget(self.gif_name_edit)
         form.addLayout(gif_row)
 
-        self.gif_transform_check = QCheckBox(
-            "Transform GIFs to VK limits (0.66:1 - 2.5:1)")
+        self.gif_transform_check = QCheckBox(GIF_TRANSFORM_LABEL)
         self.gif_transform_check.setChecked(True)
         form.addWidget(self.gif_transform_check)
 

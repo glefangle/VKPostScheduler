@@ -46,14 +46,20 @@ def main():
     sys.excepthook = handle_exception
     log.info("starting")
 
+    from config import ConfigManager
+    from vk_client import VKClient
+
     from PyQt5.QtWidgets import QApplication
-    from gui import MainWindow
+    from gui import APP_TITLE, APP_VERSION, MainWindow
 
     app = QApplication(sys.argv)
-    app.setApplicationName("VK Post Scheduler")
-    app.setApplicationVersion("1.0.0")
+    app.setApplicationName(APP_TITLE)
+    app.setApplicationVersion(APP_VERSION)
 
-    window = MainWindow(PostScheduler())
+    scheduler = PostScheduler(
+        config=ConfigManager("vk_config.json", service_name="VKPostScheduler"),
+        client=VKClient())
+    window = MainWindow(scheduler)
     window.show()
     rc = app.exec_()
 

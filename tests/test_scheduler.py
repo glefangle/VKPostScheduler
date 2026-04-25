@@ -11,14 +11,14 @@ from scheduler import (
     PostScheduler,
     PublishTimeInPastError,
 )
-from vk_config import MemoryStore, VKConfigManager, VKGroup
+from config import MemoryStore, ConfigManager, Group
 
 
 @pytest.fixture
 def sched(tmp_path, monkeypatch):
-    cfg = VKConfigManager(str(tmp_path / "vk_config.json"), MemoryStore())
+    cfg = ConfigManager(str(tmp_path / "vk_config.json"), MemoryStore())
     cfg.add_token("t1", "secret")
-    cfg.get_token("t1").add_group(VKGroup("g1", "42"))
+    cfg.get_token("t1").add_group(Group("g1", "42"))
     cfg.set_selection("t1", "g1")
 
     s = PostScheduler(config=cfg, store=JobStore(str(tmp_path / "jobs.json")))
@@ -35,7 +35,7 @@ def make_post(**kw):
 
 
 def test_validate_no_token(tmp_path):
-    cfg = VKConfigManager(str(tmp_path / "c.json"), MemoryStore())
+    cfg = ConfigManager(str(tmp_path / "c.json"), MemoryStore())
     s = PostScheduler(config=cfg, store=JobStore(str(tmp_path / "j.json")))
     problem = s.validate(make_post(), "2026-01-01", "2026-01-01", ["09:00"])
     assert "token" in problem.lower()
