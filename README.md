@@ -93,15 +93,18 @@ Produces `dist\PostScheduler.exe` via PyInstaller.
 ## Project structure
 
 ```
-main.py              Entry point: logging, crash handling, Qt loop
-gui.py               PyQt5 interface
-scheduler.py         Job queue, worker thread, retries, photo rotation
+main.py              Entry point: logging, crash handling, Qt loop, app wiring
+gui.py               PyQt5 interface (VK texts/labels live in constants at the top)
+scheduler.py         Platform-neutral job queue, worker thread, retries, photo rotation
 job_store.py         Persistence for the queue (jobs_state.json)
-vk_client.py         VK API calls: uploads, wall.post
-vk_config.py         Token/group configuration, keyring storage
-gif_transformer.py   GIF aspect ratio fixing (Pillow)
+posting_client.py    Platform-neutral PostClient contract and shared error types
+vk_client.py         VK backend: vk_api calls, VK error-code mapping
+config.py            Token/target configuration, keyring storage
+gif_transformer.py   GIF aspect ratio fixing (Pillow), limits passed in by the client
 tests/               pytest suite
 ```
+
+The queue core (`scheduler.py`, `job_store.py`, `config.py`, `posting_client.py`) is platform-neutral: `vk_api` is imported only inside `vk_client.py`.
 
 ## Troubleshooting
 
@@ -112,6 +115,11 @@ tests/               pytest suite
 - Check `error.log` and the Status tab for anything else.
 
 ## Changelog
+
+### 1.1.0
+
+- Internal refactor, no user-visible behavior changes: the queue core is now platform-neutral (`posting_client.py` defines the client contract, `vk_config.py` became generic `config.py`), and `vk_api` is imported only inside `vk_client.py`. GIF transformer limits are passed in by the backend instead of being hard-coded.
+- The group-id number check moved from the config layer into the add/edit dialog.
 
 ### 1.0.0
 
