@@ -10,7 +10,7 @@ import keyring
 
 log = logging.getLogger(__name__)
 
-KEYRING_SERVICE = "VKPostScheduler"
+DEFAULT_KEYRING_SERVICE = "PostScheduler"
 CONFIG_VERSION = 2
 
 
@@ -21,21 +21,24 @@ class ConfigError(Exception):
 class KeyringStore:
     """Secret storage backed by the OS credential store."""
 
+    def __init__(self, service: str = DEFAULT_KEYRING_SERVICE):
+        self.service = service
+
     def get(self, name: str) -> Optional[str]:
         try:
-            return keyring.get_password(KEYRING_SERVICE, name)
+            return keyring.get_password(self.service, name)
         except keyring.errors.KeyringError as e:
             raise ConfigError(f"Cannot read token '{name}' from the credential store: {e}") from e
 
     def set(self, name: str, secret: str) -> None:
         try:
-            keyring.set_password(KEYRING_SERVICE, name, secret)
+            keyring.set_password(self.service, name, secret)
         except keyring.errors.KeyringError as e:
             raise ConfigError(f"Cannot save token '{name}' to the credential store: {e}") from e
 
     def delete(self, name: str) -> None:
         try:
-            keyring.delete_password(KEYRING_SERVICE, name)
+            keyring.delete_password(self.service, name)
         except keyring.errors.KeyringError:
             # deleting a missing entry is fine
             log.debug("keyring delete failed for %s", name, exc_info=True)
@@ -58,35 +61,34 @@ class MemoryStore:
 
 
 @dataclass
-class VKGroup:
+class Group:
+    """One posting target: display name plus raw platform id."""
+
     name: str
     group_id: str
     day_schedule: List[str] = field(default_factory=list)
     default_text: str = ""
 
     def __post_init__(self):
-        # group ids are numbers, possibly negative
-        try:
-            int(str(self.group_id).lstrip("-"))
-        except (ValueError, TypeError):
-            raise ValueError(f"Invalid group ID '{self.group_id}': must be a number")
+        if not str(self.group_id).strip():
+            raise ValueError("Group id must not be empty")
         if self.day_schedule is None:
             self.day_schedule = []
 
 
 @dataclass
-class VKToken:
+class Token:
     name: str
-    groups: List[VKGroup] = field(default_factory=list)
+    groups: List[Group] = field(default_factory=list)
 
     def __post_init__(self):
         # tolerate groups loaded from the old json format
         if self.groups and isinstance(self.groups[0], dict):
-            self.groups = [VKGroup(**g) for g in self.groups]
+            self.groups = [Group(**g) for g in self.groups]
         elif self.groups is None:
             self.groups = []
 
-    def add_group(self, group: VKGroup) -> None:
+    def add_group(self, group: Group) -> None:
         if any(g.name == group.name for g in self.groups):
             raise ValueError(f"Group '{group.name}' already exists")
         self.groups.append(group)
@@ -98,13 +100,13 @@ class VKToken:
                 return True
         return False
 
-    def get_group(self, name: str) -> Optional[VKGroup]:
+    def get_group(self, name: str) -> Optional[Group]:
         for g in self.groups:
             if g.name == name:
                 return g
         return None
 
-    def update_group(self, old_name: str, new_group: VKGroup) -> bool:
+    def update_group(self, old_name: str, new_group: Group) -> bool:
         for i, g in enumerate(self.groups):
             if g.name == old_name:
                 if any(other.name == new_group.name for other in self.groups if other is not g):
@@ -114,11 +116,13 @@ class VKToken:
         return False
 
 
-class VKConfigManager:
-    def __init__(self, config_file: str = "vk_config.json", secrets: Optional[object] = None):
+class ConfigManager:
+    def __init__(self, config_file: str, secrets: Optional[object] = None,
+                 service_name: str = DEFAULT_KEYRING_SERVICE):
+        # namespaces credential-store entries between apps
         self.config_file = config_file
-        self.secrets = secrets or KeyringStore()
-        self.tokens: Dict[str, VKToken] = {}
+        self.secrets = secrets or KeyringStore(service_name)
+        self.tokens: Dict[str, Token] = {}
         self.selected_token: Optional[str] = None
         self.selected_group: Optional[str] = None
         self.load()
@@ -129,7 +133,7 @@ class VKConfigManager:
         if name in self.tokens:
             raise ValueError(f"Token '{name}' already exists")
         self.secrets.set(name, value)
-        self.tokens[name] = VKToken(name=name)
+        self.tokens[name] = Token(name=name)
         self.save()
 
     def update_token(self, old_name: str, new_name: str, new_value: Optional[str] = None) -> None:
@@ -169,7 +173,7 @@ class VKConfigManager:
         self.save()
         return True
 
-    def get_token(self, name: str) -> Optional[VKToken]:
+    def get_token(self, name: str) -> Optional[Token]:
         return self.tokens.get(name)
 
     def token_names(self) -> List[str]:
@@ -283,8 +287,8 @@ class VKConfigManager:
                     self.secrets.set(name, tok["token"])
                     del tok["token"]
                     migrated = True
-                groups = [VKGroup(**g) for g in tok.get("groups", [])]
-                self.tokens[name] = VKToken(name=name, groups=groups)
+                groups = [Group(**g) for g in tok.get("groups", [])]
+                self.tokens[name] = Token(name=name, groups=groups)
             except (TypeError, ValueError) as e:
                 # one bad entry shouldn't sink the rest
                 log.error("skipping malformed token %r: %s", name, e)
