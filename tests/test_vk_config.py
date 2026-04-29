@@ -2,12 +2,12 @@ import json
 
 import pytest
 
-from vk_config import MemoryStore, VKConfigManager, VKGroup
+from config import Group, ConfigManager, MemoryStore
 
 
 @pytest.fixture
 def cfg(tmp_path):
-    return VKConfigManager(str(tmp_path / "vk_config.json"), MemoryStore())
+    return ConfigManager(str(tmp_path / "config.json"), MemoryStore())
 
 
 def read_json(path):
@@ -19,8 +19,8 @@ def test_add_and_read_token(tmp_path, cfg):
     cfg.add_token("main", "secret123")
     assert cfg.token_value("main") == "secret123"
     # the json must hold metadata only, never the secret
-    assert "secret123" not in (tmp_path / "vk_config.json").read_text(encoding="utf-8")
-    assert "main" in read_json(tmp_path / "vk_config.json")["tokens"]
+    assert "secret123" not in (tmp_path / "config.json").read_text(encoding="utf-8")
+    assert "main" in read_json(tmp_path / "config.json")["tokens"]
 
 
 def test_duplicate_token_name(cfg):
@@ -55,7 +55,7 @@ def test_selection_requires_existing_entries(cfg):
     with pytest.raises(ValueError):
         cfg.set_selection("nope")
     cfg.add_token("t", "v")
-    cfg.get_token("t").add_group(VKGroup("g", "42"))
+    cfg.get_token("t").add_group(Group("g", "42"))
     cfg.set_selection("t", "g")
     assert cfg.has_valid_selection()
     with pytest.raises(ValueError):
@@ -63,7 +63,7 @@ def test_selection_requires_existing_entries(cfg):
 
 
 def test_v1_migration_moves_token_into_store(tmp_path):
-    path = tmp_path / "vk_config.json"
+    path = tmp_path / "config.json"
     path.write_text(json.dumps({
         "tokens": {"old": {
             "name": "old",
@@ -75,7 +75,7 @@ def test_v1_migration_moves_token_into_store(tmp_path):
         "selected_group": "g",
     }), encoding="utf-8")
 
-    cfg = VKConfigManager(str(path), MemoryStore())
+    cfg = ConfigManager(str(path), MemoryStore())
     assert cfg.token_value("old") == "v1secret"
     assert "v1secret" not in path.read_text(encoding="utf-8")
     assert cfg.selected_group_id() == "123"
@@ -83,28 +83,28 @@ def test_v1_migration_moves_token_into_store(tmp_path):
 
 
 def test_broken_config_backed_up(tmp_path):
-    path = tmp_path / "vk_config.json"
+    path = tmp_path / "config.json"
     path.write_text("{not json", encoding="utf-8")
-    VKConfigManager(str(path), MemoryStore())
-    assert (tmp_path / "vk_config.json.corrupt.bak").read_text(encoding="utf-8") == "{not json"
+    ConfigManager(str(path), MemoryStore())
+    assert (tmp_path / "config.json.corrupt.bak").read_text(encoding="utf-8") == "{not json"
     assert read_json(path)["tokens"] == {}
 
 
 def test_malformed_token_skipped(tmp_path):
-    path = tmp_path / "vk_config.json"
+    path = tmp_path / "config.json"
     path.write_text(json.dumps({
         "tokens": {
             "bad": {"name": "bad", "groups": "not-a-list"},
             "good": {"name": "good", "groups": []},
         },
     }), encoding="utf-8")
-    cfg = VKConfigManager(str(path), MemoryStore())
+    cfg = ConfigManager(str(path), MemoryStore())
     assert cfg.token_names() == ["good"]
 
 
 def test_group_schedule_time_validation(cfg):
     cfg.add_token("t", "v")
-    cfg.get_token("t").add_group(VKGroup("g", "42"))
+    cfg.get_token("t").add_group(Group("g", "42"))
     with pytest.raises(ValueError):
         cfg.set_group_schedule("t", "g", ["25:00"])
     with pytest.raises(ValueError):
@@ -116,16 +116,16 @@ def test_group_schedule_time_validation(cfg):
 def test_group_name_conflicts(cfg):
     cfg.add_token("t", "v")
     token = cfg.get_token("t")
-    token.add_group(VKGroup("a", "1"))
+    token.add_group(Group("a", "1"))
     with pytest.raises(ValueError):
-        token.add_group(VKGroup("a", "2"))
-    token.add_group(VKGroup("b", "2"))
+        token.add_group(Group("a", "2"))
+    token.add_group(Group("b", "2"))
     # renaming a onto the existing name b must be rejected
     with pytest.raises(ValueError):
-        token.update_group("a", VKGroup("b", "3"))
-    assert token.update_group("a", VKGroup("c", "3")) is True
+        token.update_group("a", Group("b", "3"))
+    assert token.update_group("a", Group("c", "3")) is True
 
 
-def test_group_id_must_be_numeric():
+def test_group_id_must_not_be_empty():
     with pytest.raises(ValueError):
-        VKGroup("bad", "club123")
+        Group("bad", "")
