@@ -2,7 +2,6 @@
 
 import logging
 import os
-import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -10,25 +9,17 @@ from datetime import datetime, timedelta
 from queue import Empty, Queue
 from typing import Callable, List, Optional, Tuple
 
-from vk_api.exceptions import ApiError
-
-from job_store import JobStore
-from vk_client import VKClient
 from config import ConfigManager
+from job_store import JobStore
+from posting_client import ClientError, PostClient, PublishTimeInPastError
 
 log = logging.getLogger(__name__)
 
-# retrying never hepls: auth, access, blocked app, invalid params
-PERMANENT_VK_CODES = {5, 7, 8, 15, 100}
 MAX_RETRIES = 3
 ERROR_WAIT = 60  # the pause gives the error dialog time to be read
 
 PHOTO_EXTS = (".jpg", ".jpeg", ".png")
-ROTATION_KEY = "user_photos"
-
-
-class PublishTimeInPastError(Exception):
-    """The publish time is in the past; nothing to retry."""
+ROTATION_KEY = "photos"
 
 
 @dataclass
@@ -40,14 +31,19 @@ class PostData:
     gif_name: str = ""
     gif_transform: bool = True
     sleep_time: int = 1
+    tags: List[str] = field(default_factory=list)
+    source_url: str = ""
+    slug: str = ""
+    send_to_twitter: bool = False
+    limit_reblog_interaction: bool = False
 
 
 class PostScheduler:
     def __init__(self, config: ConfigManager = None, store: JobStore = None,
-                 client: VKClient = None):
-        self.config = config or ConfigManager("vk_config.json")
+                 client: PostClient = None):
+        self.config = config or ConfigManager("config.json")
         self.store = store or JobStore()
-        self.client = client or VKClient()
+        self.client = client
 
         self.queue: Queue = Queue()
         # gui hooks; always called from the worker thread
@@ -73,12 +69,12 @@ class PostScheduler:
         """Return a human-readable problem, or None when input is fine."""
         token_name, group_name = self.config.get_selection()
         if not token_name:
-            return "Select a VK token first."
+            return "Select a token first."
         token = self.config.get_token(token_name)
         if not token:
             return f"Token '{token_name}' no longer exists, pick another one."
         if not group_name or not token.get_group(group_name):
-            return f"Group '{group_name}' not found in token '{token_name}', pick a group."
+            return f"Target '{group_name}' not found in token '{token_name}', pick a target."
         try:
             start = datetime.strptime(start_date, "%Y-%m-%d").date()
             end = datetime.strptime(end_date, "%Y-%m-%d").date()
@@ -148,6 +144,11 @@ class PostScheduler:
                         "different_posts": post.different_posts,
                         "gif_name": post.gif_name,
                         "gif_transform": post.gif_transform,
+                        "tags": list(post.tags),
+                        "source_url": post.source_url,
+                        "slug": post.slug,
+                        "send_to_twitter": post.send_to_twitter,
+                        "limit_reblog_interaction": post.limit_reblog_interaction,
                     },
                     "sleep_time": post.sleep_time,
                     "generation": self._generation,
@@ -326,28 +327,29 @@ class PostScheduler:
         post_time = job["post_time"]
         post_data = job.get("post_data", {})
         self._status(f"Processing {post_time}")
+        if self.client is None:
+            raise RuntimeError("no posting client configured")
 
         token = self.config.get_token(job["token_name"])
         group = token.get_group(job["group_name"]) if token else None
         if group is None:
-            raise ValueError(f"Group '{job['group_name']}' no longer exists")
+            raise ValueError(f"Target '{job['group_name']}' no longer exists")
         token_value = self.config.token_value(job["token_name"])
         if not token_value:
-            raise ValueError(f"No stored token value for '{job['token_name']}'")
+            raise ValueError(f"No stored credentials for '{job['token_name']}'")
 
         # bail out before uploading if the slot already passed
         publish_ts = self._publish_ts(post_time)
-        group_id = abs(int(group.group_id))
         api = self.client.api_for(token_value)
 
         media = self._media_for(job, post_data)
         attachment = ""
         if media:
-            attachment = self._upload_media(api, media, group_id, post_data)
+            attachment = self._upload_media(api, media, group.group_id, post_data)
 
         message = (post_data.get("text") or "").strip()
-        self.client.post_to_wall(api, -group_id, message or None,
-                                 attachment or None, publish_ts)
+        self.client.post(api, group.group_id, message or None,
+                         attachment or None, publish_ts, post_data)
 
     @staticmethod
     def _publish_ts(post_time: str) -> int:
@@ -364,15 +366,15 @@ class PostScheduler:
             return paths[job["photo_index"]]
         return post_data.get("photo_path")
 
-    def _upload_media(self, api, path: str, group_id: int, post_data: dict) -> str:
+    def _upload_media(self, api, path: str, target_id: str, post_data: dict) -> str:
         if not os.path.exists(path):
             raise FileNotFoundError(path)
         ext = os.path.splitext(path)[1].lower()
         if ext in PHOTO_EXTS:
-            return self.client.upload_photo(api, path, group_id)
+            return self.client.upload_photo(api, path, target_id)
         if ext == ".gif":
             return self.client.upload_gif(
-                api, path, group_id,
+                api, path, target_id,
                 title=post_data.get("gif_name") or None,
                 transform=post_data.get("gif_transform", True))
         raise ValueError(f"{path}: unsupported file type {ext}")
@@ -388,7 +390,7 @@ class PostScheduler:
         post_time = job["post_time"]
         attempt = job.get("attempt", 0)
         log.error("job %s failed (try %d): %s", post_time, attempt + 1, error,
-                  exc_info=not isinstance(error, ApiError))
+                  exc_info=not isinstance(error, ClientError))
 
         details = {
             "post_time": post_time,
@@ -437,15 +439,9 @@ class PostScheduler:
         if isinstance(error, ValueError):
             # bad parameters, missing group/token, unsupported file type
             return True
-        if isinstance(error, ApiError):
-            code = None
-            err_data = getattr(error, "error", None)
-            if isinstance(err_data, dict):
-                code = err_data.get("error_code")
-            if code is None:
-                m = re.search(r"\[(\d+)\]", str(error))
-                code = int(m.group(1)) if m else None
-            return code in PERMANENT_VK_CODES
+        if isinstance(error, ClientError):
+            # the backend already decided whether retrying makes sense
+            return error.permanent
         return False
 
     def _wait_while_paused(self, seconds: int) -> str:
