@@ -1,22 +1,20 @@
 from datetime import datetime
 
 import pytest
-from vk_api.exceptions import ApiError
 
 from job_store import JobStore
+from posting_client import ClientError, PublishTimeInPastError
 from scheduler import (
-    PERMANENT_VK_CODES,
     ROTATION_KEY,
     PostData,
     PostScheduler,
-    PublishTimeInPastError,
 )
-from config import MemoryStore, ConfigManager, Group
+from config import Group, ConfigManager, MemoryStore
 
 
 @pytest.fixture
 def sched(tmp_path, monkeypatch):
-    cfg = ConfigManager(str(tmp_path / "vk_config.json"), MemoryStore())
+    cfg = ConfigManager(str(tmp_path / "config.json"), MemoryStore())
     cfg.add_token("t1", "secret")
     cfg.get_token("t1").add_group(Group("g1", "42"))
     cfg.set_selection("t1", "g1")
@@ -44,7 +42,7 @@ def test_validate_no_token(tmp_path):
 def test_validate_no_group(sched):
     sched.config.set_selection("t1", None)
     problem = sched.validate(make_post(), "2026-01-01", "2026-01-01", ["09:00"])
-    assert "group" in problem.lower()
+    assert "target" in problem.lower()
 
 
 def test_validate_dates(sched):
@@ -93,6 +91,53 @@ def test_build_jobs_carries_settings(sched):
     assert job["post_data"]["gif_name"] == "cat.gif"
     assert job["sleep_time"] == 5
     assert job["generation"] == sched._generation
+
+
+def test_execute_passes_metadata_to_client(sched):
+    captured = {}
+
+    class RecordingClient:
+        def api_for(self, credential):
+            return {"ok": True}
+
+        def upload_photo(self, api, path, target_id):
+            return path
+
+        def upload_gif(self, api, path, target_id,
+                       title=None, transform=True):
+            return path
+
+        def post(self, api, target_id, message, attachment, publish_ts,
+                 metadata=None):
+            captured.update(target_id=target_id, message=message,
+                            attachment=attachment, publish_ts=publish_ts,
+                            metadata=metadata)
+            return {}
+
+    sched.client = RecordingClient()
+    sched.schedule(make_post(tags=["t1", "t2"], source_url="https://s"),
+                   "2099-01-01", "2099-01-01", ["09:00"])
+    sched._execute(sched.store.load_jobs()[0])
+
+    assert captured["target_id"] == "42"
+    assert captured["message"] == "hello"
+    assert captured["metadata"]["tags"] == ["t1", "t2"]
+    assert captured["metadata"]["source_url"] == "https://s"
+    assert captured["metadata"]["slug"] == ""
+
+
+def test_build_jobs_carries_metadata(sched):
+    post = make_post(tags=["cat", "art"], source_url="https://x.y",
+                     slug="my-post", send_to_twitter=True,
+                     limit_reblog_interaction=True)
+    jobs, _ = sched._build_jobs(post, "2099-01-01", "2099-01-01", ["09:00"],
+                                "t1", "g1")
+    data = jobs[0]["post_data"]
+    assert data["tags"] == ["cat", "art"]
+    assert data["source_url"] == "https://x.y"
+    assert data["slug"] == "my-post"
+    assert data["send_to_twitter"] is True
+    assert data["limit_reblog_interaction"] is True
 
 
 def test_schedule_replaces_previous_plan(sched):
@@ -149,24 +194,14 @@ def test_publish_ts_past(sched):
         sched._publish_ts("2020-01-01 09:00")
 
 
-def vk_error(code):
-    return ApiError(None, "wall.post", {}, None,
-                    {"error_code": code, "error_msg": "test"})
+
+def test_permanent_client_errors():
+    # the backend already decided whether retrying makes sense
+    assert PostScheduler._is_permanent(ClientError("bad token", permanent=True)) is True
+    assert PostScheduler._is_permanent(ClientError("rate limited")) is False
 
 
-def test_permanent_vk_codes():
-    assert PERMANENT_VK_CODES == {5, 7, 8, 15, 100}
-    for code in (5, 7, 8, 15, 100):
-        assert PostScheduler._is_permanent(vk_error(code)) is True
-
-
-def test_retryable_vk_codes():
-    # captcha, rate limit, flood control
-    for code in (6, 9, 14, 29):
-        assert PostScheduler._is_permanent(vk_error(code)) is False
-
-
-def test_permanent_non_vk_errors():
+def test_permanent_non_client_errors():
     assert PostScheduler._is_permanent(PublishTimeInPastError("past")) is True
     assert PostScheduler._is_permanent(FileNotFoundError("gone.jpg")) is True
     assert PostScheduler._is_permanent(ValueError("bad file type")) is True
