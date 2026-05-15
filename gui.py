@@ -304,7 +304,8 @@ class MainWindow(QMainWindow):
         root.addWidget(self.tabs)
         self.tabs.addTab(self._post_tab(), "Post")
         self.tabs.addTab(self._schedule_tab(), "Schedule")
-        self.tabs.addTab(self._status_tab(), "Status")
+        self.status_tab = self._status_tab()
+        self.tabs.addTab(self.status_tab, "Status")
 
         footer = QLabel(f"{APP_TITLE} v{APP_VERSION}")
         footer.setStyleSheet("color: #6c757d; font-size: 11px;")
@@ -460,6 +461,8 @@ class MainWindow(QMainWindow):
         jobs_box = QGroupBox("Pending jobs")
         vbox = QVBoxLayout(jobs_box)
         self.jobs_list = QListWidget()
+        # uniform item sizes; per-item hints freeze the gui on big queues
+        self.jobs_list.setUniformItemSizes(True)
         self.jobs_list.setContextMenuPolicy(Qt.CustomContextMenu)
         vbox.addWidget(self.jobs_list)
         layout.addWidget(jobs_box)
@@ -771,16 +774,18 @@ class MainWindow(QMainWindow):
         self.pause_btn.setText("Resume queue" if self.scheduler.is_paused()
                                else "Pause queue")
 
-        self.jobs_list.clear()
-        for job in self.scheduler.current_jobs():
-            line = f"{job['post_time']}  (try {job['attempt'] + 1})"
-            if "photo" in job:
-                line += f"  {job['photo']}"
-                if job.get("photo_total", 1) > 1:
-                    line += f"  [{job['photo_no']}/{job['photo_total']}]"
-            item = QListWidgetItem(line)
-            item.setData(Qt.UserRole, job["post_time"])
-            self.jobs_list.addItem(item)
+        # skip the list rebuild while the status tab is hidden
+        if self.tabs.currentWidget() is self.status_tab:
+            self.jobs_list.clear()
+            for job in self.scheduler.current_jobs():
+                line = f"{job['post_time']}  (try {job['attempt'] + 1})"
+                if "photo" in job:
+                    line += f"  {job['photo']}"
+                    if job.get("photo_total", 1) > 1:
+                        line += f"  [{job['photo_no']}/{job['photo_total']}]"
+                item = QListWidgetItem(line)
+                item.setData(Qt.UserRole, job["post_time"])
+                self.jobs_list.addItem(item)
 
     def _show_error(self, message: str, details: dict):
         self._log(message)

@@ -106,9 +106,11 @@ class PostScheduler:
         if not jobs:
             return False, "Nothing to schedule."
 
-        self.store.add_jobs(jobs)
+        shared = self._shared_post_data(post)
         for job in jobs:
+            job["post_data"] = shared
             self.queue.put(job)
+        self.store.add_jobs(jobs, post_data=shared)
         self._total = len(jobs)
         self.ensure_worker()
         self._status(f"Scheduled {len(jobs)} posts, working in the background.",
@@ -137,19 +139,6 @@ class PostScheduler:
                     "attempt": 0,
                     "token_name": token_name,
                     "group_name": group_name,
-                    "post_data": {
-                        "text": post.text,
-                        "photo_path": post.photo_path,
-                        "photo_paths": post.photo_paths,
-                        "different_posts": post.different_posts,
-                        "gif_name": post.gif_name,
-                        "gif_transform": post.gif_transform,
-                        "tags": list(post.tags),
-                        "source_url": post.source_url,
-                        "slug": post.slug,
-                        "send_to_twitter": post.send_to_twitter,
-                        "limit_reblog_interaction": post.limit_reblog_interaction,
-                    },
                     "sleep_time": post.sleep_time,
                     "generation": self._generation,
                 }
@@ -165,6 +154,23 @@ class PostScheduler:
         if photo_idx is not None:
             self.store.set_rotation(ROTATION_KEY, photo_idx - 1)
         return jobs, exhausted
+
+    @staticmethod
+    def _shared_post_data(post: PostData) -> dict:
+        """The plan's content as one shaared copy, stored once."""
+        return {
+            "text": post.text,
+            "photo_path": post.photo_path,
+            "photo_paths": list(post.photo_paths),
+            "different_posts": post.different_posts,
+            "gif_name": post.gif_name,
+            "gif_transform": post.gif_transform,
+            "tags": list(post.tags),
+            "source_url": post.source_url,
+            "slug": post.slug,
+            "send_to_twitter": post.send_to_twitter,
+            "limit_reblog_interaction": post.limit_reblog_interaction,
+        }
 
     def _throw_out_plan(self):
         self._generation += 1
