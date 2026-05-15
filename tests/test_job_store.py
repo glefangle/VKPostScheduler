@@ -68,3 +68,47 @@ def test_no_temp_files_left_behind(tmp_path):
     store.save_jobs([make_job("2026-10-01 09:00")])
     store.set_rotation("user_photos", 0)
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_shared_post_data_stored_once_and_rehydrated(tmp_path):
+    store = JobStore(str(tmp_path / "jobs.json"))
+    shared = {"text": "hi", "photo_paths": [f"p{i}.jpg" for i in range(200)]}
+    store.add_jobs([make_job(f"2026-10-01 09:{m:02d}") for m in range(10)],
+                   post_data=shared)
+
+    doc = json.loads((tmp_path / "jobs.json").read_text(encoding="utf-8"))
+    assert doc["post_data"]["text"] == "hi"
+    assert all("post_data" not in row for row in doc["jobs"])
+
+    loaded = store.load_jobs()
+    assert all(j["post_data"]["text"] == "hi" for j in loaded)
+    # each job gets its own copy of the shared dict
+    assert loaded[0]["post_data"] is not loaded[1]["post_data"]
+
+
+def test_legacy_jobs_keep_own_post_data(tmp_path):
+    # files written by older versions carry post_data inside every job
+    path = tmp_path / "jobs.json"
+    job = make_job("2026-10-01 09:00",
+                   post_data={"text": "old", "photo_paths": ["x.jpg"]})
+    path.write_text(json.dumps({"jobs": [job]}), encoding="utf-8")
+    store = JobStore(str(path))
+    assert store.load_jobs()[0]["post_data"]["text"] == "old"
+
+
+def test_clear_jobs_drops_shared_post_data(tmp_path):
+    store = JobStore(str(tmp_path / "jobs.json"))
+    store.add_jobs([make_job("2026-10-01 09:00")], post_data={"text": "hi"})
+    store.clear_jobs()
+    doc = json.loads((tmp_path / "jobs.json").read_text(encoding="utf-8"))
+    assert "post_data" not in doc
+
+
+def test_rereads_file_changed_externally(tmp_path):
+    path = tmp_path / "jobs.json"
+    store = JobStore(str(path))
+    store.add_jobs([make_job("2026-10-01 09:00")])
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["jobs"].append(make_job("2026-10-01 10:00"))
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert store.pending_count() == 2
