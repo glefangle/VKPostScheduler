@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 import pytest
@@ -83,10 +84,10 @@ def test_build_jobs_normal_mode(sched):
     assert all("photo_index" not in j for j in jobs)
 
 
-def test_build_jobs_carries_settings(sched):
+def test_schedule_carries_settings(sched):
     post = make_post(text="t", gif_name="cat.gif", gif_transform=False, sleep_time=5)
-    jobs, _ = sched._build_jobs(post, "2099-01-01", "2099-01-01", ["09:00"], "t1", "g1")
-    job = jobs[0]
+    sched.schedule(post, "2099-01-01", "2099-01-01", ["09:00"])
+    job = sched.store.load_jobs()[0]
     assert job["post_data"]["gif_transform"] is False
     assert job["post_data"]["gif_name"] == "cat.gif"
     assert job["sleep_time"] == 5
@@ -126,18 +127,28 @@ def test_execute_passes_metadata_to_client(sched):
     assert captured["metadata"]["slug"] == ""
 
 
-def test_build_jobs_carries_metadata(sched):
+def test_schedule_carries_metadata(sched):
     post = make_post(tags=["cat", "art"], source_url="https://x.y",
                      slug="my-post", send_to_twitter=True,
                      limit_reblog_interaction=True)
-    jobs, _ = sched._build_jobs(post, "2099-01-01", "2099-01-01", ["09:00"],
-                                "t1", "g1")
-    data = jobs[0]["post_data"]
+    sched.schedule(post, "2099-01-01", "2099-01-01", ["09:00"])
+    data = sched.store.load_jobs()[0]["post_data"]
     assert data["tags"] == ["cat", "art"]
     assert data["source_url"] == "https://x.y"
     assert data["slug"] == "my-post"
     assert data["send_to_twitter"] is True
     assert data["limit_reblog_interaction"] is True
+
+
+def test_plan_content_stored_once(sched):
+    # 200 jobs must not serialize the photo list per job
+    post = make_post(photo_paths=[f"p{i}.jpg" for i in range(200)],
+                     different_posts=True)
+    sched.schedule(post, "2099-01-01", "2099-01-01", ["09:00"])
+    with open(sched.store.path, encoding="utf-8") as f:
+        doc = json.load(f)
+    assert doc["post_data"]["photo_paths"][0] == "p0.jpg"
+    assert all("post_data" not in row for row in doc["jobs"])
 
 
 def test_schedule_replaces_previous_plan(sched):
