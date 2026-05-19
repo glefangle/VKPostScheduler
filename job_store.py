@@ -1,10 +1,11 @@
 """Persistent job queue and photo rotation state (jobs_state.json)."""
 
-import json
 import logging
 import os
 import threading
 from typing import List, Optional
+
+import jsonio
 
 log = logging.getLogger(__name__)
 
@@ -122,37 +123,13 @@ class JobStore:
         self._cache = None
         if key is None:
             return {}
-        try:
-            with open(self.path, "r", encoding="utf-8") as f:
-                doc = json.load(f)
-        except (json.JSONDecodeError, OSError, ValueError) as e:
-            backup = self.path + ".corrupt.bak"
-            log.error("%s is unreadable (%s), backed up to %s, starting empty",
-                      self.path, e, backup)
-            try:
-                os.replace(self.path, backup)
-            except OSError:
-                pass
-            return {}
-        if not isinstance(doc, dict):
-            doc = {}
+        doc = jsonio.read_json(self.path)
         self._cache = (key, doc)
         return doc
 
     def _save_doc(self, doc: dict) -> None:
-        tmp = self.path + ".tmp"
-        try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(doc, f, ensure_ascii=False, separators=(",", ":"))
-            os.replace(tmp, self.path)
-        except OSError as e:
-            log.error("failed to write %s: %s", self.path, e)
+        if not jsonio.write_json(self.path, doc):
             self._cache = None  # next read must see what is actually on disk
-            if os.path.exists(tmp):
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
             return
         key = self._stat_key()
         self._cache = (key, doc) if key is not None else None

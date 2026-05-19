@@ -1,12 +1,12 @@
 """Token/target configuration; secrets live in the OS credential store."""
 
-import json
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 import keyring
+
+import jsonio
 
 log = logging.getLogger(__name__)
 
@@ -266,17 +266,7 @@ class ConfigManager:
     # -- persistence ---------------------------------------------------------
 
     def load(self) -> None:
-        if not os.path.exists(self.config_file):
-            self.save()
-            return
-
-        try:
-            with open(self.config_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            self._backup_broken_file(e)
-            self.save()
-            return
+        data = jsonio.read_json(self.config_file)
 
         tokens_data = data.get("tokens", {})
         migrated = False
@@ -318,24 +308,4 @@ class ConfigManager:
             "selected_token": self.selected_token,
             "selected_group": self.selected_group,
         }
-        tmp = self.config_file + ".tmp"
-        try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, self.config_file)
-        except OSError as e:
-            log.error("failed to save %s: %s", self.config_file, e)
-            if os.path.exists(tmp):
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
-
-    def _backup_broken_file(self, error: Exception) -> None:
-        backup = self.config_file + ".corrupt.bak"
-        log.error("config %s is unreadable (%s), backed up to %s",
-                  self.config_file, error, backup)
-        try:
-            os.replace(self.config_file, backup)
-        except OSError:
-            pass
+        jsonio.write_json(self.config_file, data, indent=2)
