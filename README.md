@@ -95,16 +95,17 @@ Produces `dist\PostScheduler.exe` via PyInstaller.
 ```
 main.py              Entry point: logging, crash handling, Qt loop, app wiring
 gui.py               PyQt5 interface (VK texts/labels live in constants at the top)
-scheduler.py         Platform-neutral job queue, worker thread, retries, photo rotation
+scheduler.py         Job queue, worker thread, retries, photo rotation
 job_store.py         Persistence for the queue (jobs_state.json)
-posting_client.py    Platform-neutral PostClient contract and shared error types
+jsonio.py            Shared json io for the state files (atomic writes, corrupt backups)
+posting_client.py    PostClient contract and shared error types
 vk_client.py         VK backend: vk_api calls, VK error-code mapping
 config.py            Token/target configuration, keyring storage
 gif_transformer.py   GIF aspect ratio fixing (Pillow), limits passed in by the client
 tests/               pytest suite
 ```
 
-The queue core (`scheduler.py`, `job_store.py`, `config.py`, `posting_client.py`) is platform-neutral: `vk_api` is imported only inside `vk_client.py`.
+The queue core (`scheduler.py`, `job_store.py`, `jsonio.py`, `config.py`, `posting_client.py`) does not import `vk_api`: it is imported only inside `vk_client.py`, so the backend is the only VK-specific module.
 
 ## Troubleshooting
 
