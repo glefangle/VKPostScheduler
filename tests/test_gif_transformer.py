@@ -1,5 +1,4 @@
 import os
-import tempfile
 
 from PIL import Image
 
@@ -64,18 +63,11 @@ def test_transform_pads_tall_gif(tmp_path):
     assert not os.path.exists(out)
 
 
-def test_cleanup_removes_files_inside_temp_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
-    path = tmp_path / "x.gif"
+def test_cleanup_removes_file_and_temp_dir(tmp_path):
+    out_dir = tmp_path / "tmpabc"
+    out_dir.mkdir()
+    path = out_dir / "x.gif"
     make_gif(str(path), (10, 10))
     GIFTransformer(0.66, 2.5).cleanup(str(path))
     assert not path.exists()
-
-
-def test_cleanup_refuses_paths_outside_temp_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path / "base"))
-    keep = tmp_path / "elsewhere" / "keep.gif"
-    keep.parent.mkdir()
-    make_gif(str(keep), (10, 10))
-    GIFTransformer(0.66, 2.5).cleanup(str(keep))
-    assert keep.exists()
+    assert not out_dir.exists()

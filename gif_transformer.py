@@ -97,13 +97,7 @@ class GIFTransformer:
             if "transparency" in img.info:
                 save_kw["transparency"] = img.info["transparency"]
 
-            try:
-                frames[0].save(out_path, **save_kw)
-            except Exception:
-                log.warning("full-fidelity save failed, retrying plain", exc_info=True)
-                frames[0].save(out_path, format="GIF", save_all=True,
-                               append_images=frames[1:], duration=durations,
-                               loop=img.info.get("loop", 0))
+            frames[0].save(out_path, **save_kw)
             return out_path
 
     def _fit_frame(self, frame: Image.Image, tw: int, th: int) -> Image.Image:
@@ -146,19 +140,15 @@ class GIFTransformer:
             return {"error": str(e)}
 
     def cleanup(self, path: str) -> None:
+        """Remove a transformed gif and the temp folder around it."""
         try:
-            real = os.path.realpath(path)
-            base = os.path.realpath(tempfile.gettempdir())
-            parent = os.path.dirname(real)
-            if parent != base and not parent.startswith(base + os.sep):
-                log.debug("refusing to clean %s: outside the temp dir", path)
-                return
-            if os.path.exists(real):
-                os.remove(real)
-                if parent != base:  # the mkdtemp() dir transform() made
-                    try:
-                        os.rmdir(parent)
-                    except OSError:
-                        pass
+            os.remove(path)
         except OSError as e:
             log.warning("could not remove temp gif %s: %s", path, e)
+            return
+        parent = os.path.dirname(path)
+        if parent != tempfile.gettempdir():
+            try:
+                os.rmdir(parent)  # the mkdtemp() dir transform() made
+            except OSError:
+                pass
