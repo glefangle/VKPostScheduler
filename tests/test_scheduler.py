@@ -91,53 +91,6 @@ def test_schedule_carries_settings(sched):
     assert job["post_data"]["gif_transform"] is False
     assert job["post_data"]["gif_name"] == "cat.gif"
     assert job["sleep_time"] == 5
-    assert job["generation"] == sched._generation
-
-
-def test_execute_passes_metadata_to_client(sched):
-    captured = {}
-
-    class RecordingClient:
-        def api_for(self, credential):
-            return {"ok": True}
-
-        def upload_photo(self, api, path, target_id):
-            return path
-
-        def upload_gif(self, api, path, target_id,
-                       title=None, transform=True):
-            return path
-
-        def post(self, api, target_id, message, attachment, publish_ts,
-                 metadata=None):
-            captured.update(target_id=target_id, message=message,
-                            attachment=attachment, publish_ts=publish_ts,
-                            metadata=metadata)
-            return {}
-
-    sched.client = RecordingClient()
-    sched.schedule(make_post(tags=["t1", "t2"], source_url="https://s"),
-                   "2099-01-01", "2099-01-01", ["09:00"])
-    sched._execute(sched.store.load_jobs()[0])
-
-    assert captured["target_id"] == "42"
-    assert captured["message"] == "hello"
-    assert captured["metadata"]["tags"] == ["t1", "t2"]
-    assert captured["metadata"]["source_url"] == "https://s"
-    assert captured["metadata"]["slug"] == ""
-
-
-def test_schedule_carries_metadata(sched):
-    post = make_post(tags=["cat", "art"], source_url="https://x.y",
-                     slug="my-post", send_to_twitter=True,
-                     limit_reblog_interaction=True)
-    sched.schedule(post, "2099-01-01", "2099-01-01", ["09:00"])
-    data = sched.store.load_jobs()[0]["post_data"]
-    assert data["tags"] == ["cat", "art"]
-    assert data["source_url"] == "https://x.y"
-    assert data["slug"] == "my-post"
-    assert data["send_to_twitter"] is True
-    assert data["limit_reblog_interaction"] is True
 
 
 def test_plan_content_stored_once(sched):

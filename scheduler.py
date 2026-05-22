@@ -31,11 +31,6 @@ class PostData:
     gif_name: str = ""
     gif_transform: bool = True
     sleep_time: int = 1
-    tags: List[str] = field(default_factory=list)
-    source_url: str = ""
-    slug: str = ""
-    send_to_twitter: bool = False
-    limit_reblog_interaction: bool = False
 
 
 class PostScheduler:
@@ -165,11 +160,6 @@ class PostScheduler:
             "different_posts": post.different_posts,
             "gif_name": post.gif_name,
             "gif_transform": post.gif_transform,
-            "tags": list(post.tags),
-            "source_url": post.source_url,
-            "slug": post.slug,
-            "send_to_twitter": post.send_to_twitter,
-            "limit_reblog_interaction": post.limit_reblog_interaction,
         }
 
     def _throw_out_plan(self):
