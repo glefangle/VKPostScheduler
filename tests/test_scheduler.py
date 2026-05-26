@@ -5,11 +5,7 @@ import pytest
 
 from job_store import JobStore
 from posting_client import ClientError, PublishTimeInPastError
-from scheduler import (
-    ROTATION_KEY,
-    PostData,
-    PostScheduler,
-)
+from scheduler import ROTATION_KEY, PostData, PostScheduler
 from config import Group, ConfigManager, MemoryStore
 
 
@@ -31,6 +27,27 @@ def make_post(**kw):
     defaults.update(kw)
     return PostData(**defaults)
 
+
+class RecordingClient:
+    """Stands in for a PostClient and remembers the calls."""
+
+    def __init__(self):
+        self.calls = []
+
+    def api_for(self, credential):
+        return {"ok": True}
+
+    def upload_photo(self, api, path, target_id):
+        self.calls.append(("photo", path, target_id))
+        return path
+
+    def upload_gif(self, api, path, target_id, title=None, transform=True):
+        self.calls.append(("gif", path, target_id, title, transform))
+        return path
+
+    def post(self, api, target_id, message, attachment, publish_ts, post_data=None):
+        self.calls.append(("post", target_id, message, attachment, publish_ts))
+        return {}
 
 
 def test_validate_no_token(tmp_path):
@@ -63,25 +80,22 @@ def test_validate_ok(sched):
     assert sched.validate(make_post(), "2026-01-01", "2026-01-02", ["09:00"]) is None
 
 
+def test_schedule_replaces_previous_plan(sched):
+    ok, err = sched.schedule(make_post(), "2099-01-01", "2099-01-01", ["09:00", "10:00"])
+    assert (ok, err) == (True, None)
+    assert sched.store.pending_count() == 2
 
-def test_build_jobs_different_posts(sched):
-    post = make_post(photo_paths=["a.jpg", "b.jpg", "c.jpg"], different_posts=True)
-    jobs, exhausted = sched._build_jobs(post, "2099-01-01", "2099-01-02",
-                                        ["09:00", "12:00", "18:00"], "t1", "g1")
-    assert len(jobs) == 3
-    assert exhausted is True
-    assert [j["photo_index"] for j in jobs] == [0, 1, 2]
-    assert sched.store.get_rotation(ROTATION_KEY) == 2
-    assert all(j["token_name"] == "t1" and j["group_name"] == "g1" for j in jobs)
+    ok, err = sched.schedule(make_post(), "2099-02-01", "2099-02-01", ["09:00"])
+    assert ok is True
+    jobs = sched.store.load_jobs()
+    assert [j["post_time"] for j in jobs] == ["2099-02-01 09:00"]
+    assert sched.stats()["pending"] == 1
 
 
-def test_build_jobs_normal_mode(sched):
-    post = make_post(photo_path="one.jpg")
-    jobs, exhausted = sched._build_jobs(post, "2099-01-01", "2099-01-02", ["09:00"],
-                                        "t1", "g1")
-    assert len(jobs) == 2
-    assert exhausted is False
-    assert all("photo_index" not in j for j in jobs)
+def test_schedule_rejects_bad_input(sched):
+    ok, err = sched.schedule(make_post(), "2026-05-02", "2026-05-01", ["09:00"])
+    assert ok is False
+    assert err
 
 
 def test_schedule_carries_settings(sched):

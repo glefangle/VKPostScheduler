@@ -79,9 +79,7 @@ class TokenDialog(QDialog):
         self.value_edit.setEchoMode(QLineEdit.Password)
         if token_name:
             self.name_edit.setText(token_name)
-            stored = config.token_value(token_name)
-            if stored:
-                self.value_edit.setText(stored)
+            self.value_edit.setText(config.token_value(token_name) or "")
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._save)
@@ -103,8 +101,7 @@ class TokenDialog(QDialog):
             return
         try:
             if self.token_name:
-                self.config.update_token(self.token_name, name,
-                                         value if value else None)
+                self.config.update_token(self.token_name, name, value)
             else:
                 self.config.add_token(name, value)
         except Exception as e:

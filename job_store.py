@@ -30,8 +30,7 @@ class JobStore:
             for row in self._valid_rows(doc.get("jobs", [])):
                 job = dict(row)
                 if "post_data" not in job and isinstance(shared, dict):
-                    # own copy, not the cached one
-                    job["post_data"] = dict(shared)
+                    job["post_data"] = dict(shared)  # own copy, not the cached one
                 jobs.append(job)
             return jobs
 
@@ -71,6 +70,7 @@ class JobStore:
         with self.lock:
             doc = self._load_doc()
             doc["jobs"] = []
+            doc.pop("post_data", None)
             self._save_doc(doc)
 
     def pending_count(self) -> int:
