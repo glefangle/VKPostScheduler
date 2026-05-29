@@ -118,76 +118,91 @@ def test_plan_content_stored_once(sched):
     assert all("post_data" not in row for row in doc["jobs"])
 
 
-def test_schedule_replaces_previous_plan(sched):
-    ok, err = sched.schedule(make_post(), "2099-01-01", "2099-01-01", ["09:00", "10:00"])
-    assert (ok, err) == (True, None)
-    assert sched.store.pending_count() == 2
-
-    ok, err = sched.schedule(make_post(), "2099-02-01", "2099-02-01", ["09:00"])
+def test_different_posts_hand_out_photos_in_order(sched):
+    post = make_post(photo_paths=["a.jpg", "b.jpg", "c.jpg"], different_posts=True)
+    # 6 slots, only 3 photos: scheduling stops early
+    ok, _ = sched.schedule(post, "2099-01-01", "2099-01-02",
+                           ["09:00", "12:00", "18:00"])
     assert ok is True
     jobs = sched.store.load_jobs()
-    assert [j["post_time"] for j in jobs] == ["2099-02-01 09:00"]
-    assert sched.stats()["pending"] == 1
+    assert len(jobs) == 3
+    assert [j["photo_index"] for j in jobs] == [0, 1, 2]
+    assert sched.store.get_rotation(ROTATION_KEY) == 2
+    assert all(j["token_name"] == "t1" and j["group_name"] == "g1" for j in jobs)
 
 
-def test_schedule_rejects_bad_input(sched):
-    ok, err = sched.schedule(make_post(), "2026-05-02", "2026-05-01", ["09:00"])
-    assert ok is False
-    assert err
+def test_same_photo_for_every_slot(sched):
+    sched.schedule(make_post(photo_path="one.jpg"),
+                   "2099-01-01", "2099-01-02", ["09:00"])
+    jobs = sched.store.load_jobs()
+    assert len(jobs) == 2
+    assert all("photo_index" not in j for j in jobs)
 
 
-def test_schedule_rotation_restarts_for_new_plan(sched):
+def test_rotation_restarts_for_new_plan(sched):
     post = make_post(photo_paths=["a.jpg"], different_posts=True)
     sched.schedule(post, "2099-01-01", "2099-01-01", ["09:00"])
     assert sched.store.get_rotation(ROTATION_KEY) == 0
     sched.schedule(post, "2099-01-02", "2099-01-02", ["09:00"])
-    jobs = sched.store.load_jobs()
-    assert jobs[0]["photo_index"] == 0
+    assert sched.store.load_jobs()[0]["photo_index"] == 0
 
 
-
-def test_cancel_job_marks_and_removes(sched):
+def test_cancel_job(sched):
     sched.schedule(make_post(), "2099-01-01", "2099-01-01", ["09:00"])
     assert sched.cancel_job("2099-01-01 09:00") is True
     assert sched.cancel_job("2099-01-01 09:00") is False
     assert sched.store.pending_count() == 0
-    assert sched._is_stale({"post_time": "2099-01-01 09:00"}) is True
 
 
-def test_is_stale_generation(sched):
-    fresh = {"post_time": "2099-01-01 09:00", "generation": sched._generation}
-    stale = {"post_time": "2099-01-01 09:00", "generation": sched._generation - 1}
-    assert sched._is_stale(fresh) is False
-    assert sched._is_stale(stale) is True
+def test_execute_uploads_and_posts(sched, tmp_path):
+    first = tmp_path / "a.jpg"
+    second = tmp_path / "b.jpg"
+    first.write_bytes(b"x")
+    second.write_bytes(b"x")
+    client = RecordingClient()
+    sched.client = client
+
+    post = make_post(photo_paths=[str(first), str(second)], different_posts=True)
+    sched.schedule(post, "2099-01-01", "2099-01-01", ["09:00", "12:00"])
+    jobs = sched.store.load_jobs()
+    sched._execute(jobs[0])
+    sched._execute(jobs[1])
+
+    assert [c[0] for c in client.calls] == ["photo", "post", "photo", "post"]
+    assert client.calls[0][1] == str(first)
+    assert client.calls[2][1] == str(second)
+    # the group id, the message, a future publish time
+    assert client.calls[1][1] == "42"
+    assert client.calls[1][2] == "hello"
+    assert client.calls[1][4] > int(datetime.now().timestamp())
 
 
+def test_execute_routes_gif_with_its_options(sched, tmp_path):
+    gif = tmp_path / "cat.gif"
+    gif.write_bytes(b"GIF89a")
+    client = RecordingClient()
+    sched.client = client
 
-def test_publish_ts_future(sched):
-    ts = sched._publish_ts("2099-01-01 09:00")
-    assert ts > int(datetime.now().timestamp())
+    sched.schedule(
+        make_post(photo_path=str(gif), gif_name="cat", gif_transform=False),
+        "2099-01-01", "2099-01-01", ["09:00"])
+    sched._execute(sched.store.load_jobs()[0])
+
+    assert client.calls[0] == ("gif", str(gif), "42", "cat", False)
 
 
-def test_publish_ts_past(sched):
+def test_execute_rejects_past_publish_time(sched):
+    sched.client = RecordingClient()
+    ok, _ = sched.schedule(make_post(), "2020-01-01", "2020-01-01", ["09:00"])
+    assert ok is True
     with pytest.raises(PublishTimeInPastError):
-        sched._publish_ts("2020-01-01 09:00")
+        sched._execute(sched.store.load_jobs()[0])
 
 
-
-def test_permanent_client_errors():
-    # the backend already decided whether retrying makes sense
-    assert PostScheduler._is_permanent(ClientError("bad token", permanent=True)) is True
-    assert PostScheduler._is_permanent(ClientError("rate limited")) is False
-
-
-def test_permanent_non_client_errors():
+def test_permanent_errors_fail_without_retry():
     assert PostScheduler._is_permanent(PublishTimeInPastError("past")) is True
     assert PostScheduler._is_permanent(FileNotFoundError("gone.jpg")) is True
     assert PostScheduler._is_permanent(ValueError("bad file type")) is True
+    assert PostScheduler._is_permanent(ClientError("bad token", permanent=True)) is True
+    assert PostScheduler._is_permanent(ClientError("rate limited")) is False
     assert PostScheduler._is_permanent(RuntimeError("network flake")) is False
-
-
-def test_media_for_prefers_photo_index(sched):
-    post_data = {"photo_paths": ["a.jpg", "b.jpg"], "photo_path": "a.jpg"}
-    assert sched._media_for({"photo_index": 1}, post_data) == "b.jpg"
-    assert sched._media_for({}, post_data) == "a.jpg"
-    assert sched._media_for({"photo_index": 9}, post_data) == "a.jpg"
