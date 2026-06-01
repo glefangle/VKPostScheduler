@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Protocol, cast
 
 import keyring
 
@@ -18,13 +18,23 @@ class ConfigError(Exception):
     pass
 
 
+class SecretStore(Protocol):
+    """Token value storage: keyring in production, memory in tests."""
+
+    def get(self, name: str) -> str | None: ...
+
+    def set(self, name: str, secret: str) -> None: ...
+
+    def delete(self, name: str) -> None: ...
+
+
 class KeyringStore:
     """Secret storage backed by the OS credential store."""
 
     def __init__(self, service: str = DEFAULT_KEYRING_SERVICE):
         self.service = service
 
-    def get(self, name: str) -> Optional[str]:
+    def get(self, name: str) -> str | None:
         try:
             return keyring.get_password(self.service, name)
         except keyring.errors.KeyringError as e:
@@ -48,9 +58,9 @@ class MemoryStore:
     """In-memory store, used by tests."""
 
     def __init__(self):
-        self.secrets: Dict[str, str] = {}
+        self.secrets: dict[str, str] = {}
 
-    def get(self, name: str) -> Optional[str]:
+    def get(self, name: str) -> str | None:
         return self.secrets.get(name)
 
     def set(self, name: str, secret: str) -> None:
@@ -66,7 +76,7 @@ class Group:
 
     name: str
     group_id: str
-    day_schedule: List[str] = field(default_factory=list)
+    day_schedule: list[str] = field(default_factory=list)
     default_text: str = ""
 
     def __post_init__(self):
@@ -79,12 +89,13 @@ class Group:
 @dataclass
 class Token:
     name: str
-    groups: List[Group] = field(default_factory=list)
+    groups: list[Group] = field(default_factory=list)
 
     def __post_init__(self):
         # tolerate groups loaded from the old json format
         if self.groups and isinstance(self.groups[0], dict):
-            self.groups = [Group(**g) for g in self.groups]
+            raw: list[Any] = cast(list[Any], self.groups)
+            self.groups = [Group(**g) for g in raw]
         elif self.groups is None:
             self.groups = []
 
@@ -100,7 +111,7 @@ class Token:
                 return True
         return False
 
-    def get_group(self, name: str) -> Optional[Group]:
+    def get_group(self, name: str) -> Group | None:
         for g in self.groups:
             if g.name == name:
                 return g
@@ -117,14 +128,14 @@ class Token:
 
 
 class ConfigManager:
-    def __init__(self, config_file: str, secrets: Optional[object] = None,
+    def __init__(self, config_file: str, secrets: SecretStore | None = None,
                  service_name: str = DEFAULT_KEYRING_SERVICE):
         # namespaces credential-store entries between apps
         self.config_file = config_file
-        self.secrets = secrets or KeyringStore(service_name)
-        self.tokens: Dict[str, Token] = {}
-        self.selected_token: Optional[str] = None
-        self.selected_group: Optional[str] = None
+        self.secrets: SecretStore = secrets or KeyringStore(service_name)
+        self.tokens: dict[str, Token] = {}
+        self.selected_token: str | None = None
+        self.selected_group: str | None = None
         self.load()
 
     # -- tokens ------------------------------------------------------------
@@ -136,7 +147,7 @@ class ConfigManager:
         self.tokens[name] = Token(name=name)
         self.save()
 
-    def update_token(self, old_name: str, new_name: str, new_value: Optional[str] = None) -> None:
+    def update_token(self, old_name: str, new_name: str, new_value: str | None = None) -> None:
         if old_name not in self.tokens:
             raise ValueError(f"Token '{old_name}' not found")
         if old_name != new_name:
@@ -151,7 +162,8 @@ class ConfigManager:
             # rename only: rehang the secret under the new name
             value = self.secrets.get(old_name)
             if value is None:
-                raise ConfigError(f"Token value for '{old_name}' is missing from the credential store")
+                raise ConfigError(f"Token value for '{old_name}' is missing "
+                                  f"from the credential store")
             self.secrets.set(new_name, value)
             self.secrets.delete(old_name)
 
@@ -173,24 +185,24 @@ class ConfigManager:
         self.save()
         return True
 
-    def get_token(self, name: str) -> Optional[Token]:
+    def get_token(self, name: str) -> Token | None:
         return self.tokens.get(name)
 
-    def token_names(self) -> List[str]:
+    def token_names(self) -> list[str]:
         return list(self.tokens)
 
-    def group_names(self, token_name: str) -> List[str]:
+    def group_names(self, token_name: str) -> list[str]:
         token = self.tokens.get(token_name)
         return [g.name for g in token.groups] if token else []
 
-    def token_value(self, name: str) -> Optional[str]:
+    def token_value(self, name: str) -> str | None:
         if name not in self.tokens:
             return None
         return self.secrets.get(name)
 
     # -- selection ---------------------------------------------------------
 
-    def set_selection(self, token_name: Optional[str], group_name: Optional[str] = None) -> None:
+    def set_selection(self, token_name: str | None, group_name: str | None = None) -> None:
         if token_name and token_name not in self.tokens:
             raise ValueError(f"Token '{token_name}' not found")
         if token_name and group_name:
@@ -212,10 +224,10 @@ class ConfigManager:
             and self.selected_group_id() is not None
         )
 
-    def selected_token_value(self) -> Optional[str]:
+    def selected_token_value(self) -> str | None:
         return self.token_value(self.selected_token) if self.selected_token else None
 
-    def selected_group_id(self) -> Optional[str]:
+    def selected_group_id(self) -> str | None:
         token = self.tokens.get(self.selected_token) if self.selected_token else None
         if not token or not self.selected_group:
             return None
@@ -224,12 +236,12 @@ class ConfigManager:
 
     # -- per-group schedule and default text -------------------------------
 
-    def get_group_schedule(self, token_name: str, group_name: str) -> List[str]:
+    def get_group_schedule(self, token_name: str, group_name: str) -> list[str]:
         token = self.tokens.get(token_name)
         group = token.get_group(group_name) if token else None
         return list(group.day_schedule) if group else []
 
-    def set_group_schedule(self, token_name: str, group_name: str, schedule: List[str]) -> None:
+    def set_group_schedule(self, token_name: str, group_name: str, schedule: list[str]) -> None:
         group = self._group_or_raise(token_name, group_name)
         for t in schedule:
             self._check_time(t)

@@ -10,7 +10,7 @@ log = logging.getLogger(__name__)
 def read_json(path: str) -> dict:
     """Parse path, return {} when missing or broken."""
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             doc = json.load(f)
     except FileNotFoundError:
         return {}
@@ -25,7 +25,7 @@ def read_json(path: str) -> dict:
     return doc if isinstance(doc, dict) else {}
 
 
-def write_json(path: str, doc: dict, indent: int = None) -> bool:
+def write_json(path: str, doc: dict, indent: int | None = None) -> bool:
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:

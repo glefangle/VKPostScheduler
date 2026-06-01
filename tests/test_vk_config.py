@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from config import Group, ConfigManager, MemoryStore
+from config import ConfigManager, Group, MemoryStore
 
 
 @pytest.fixture

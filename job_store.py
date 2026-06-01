@@ -3,7 +3,6 @@
 import logging
 import os
 import threading
-from typing import List, Optional
 
 import jsonio
 
@@ -17,11 +16,11 @@ class JobStore:
         self.path = path
         self.lock = threading.RLock()
         # (mtime_ns, size) -> parsed doc; skip re-parsing when unchanged
-        self._cache = None
+        self._cache: tuple[tuple[int, int], dict] | None = None
 
     # -- jobs ----------------------------------------------------------------
 
-    def load_jobs(self) -> List[dict]:
+    def load_jobs(self) -> list[dict]:
         """Jobs with their post_data reattached from the plan's shared copy."""
         with self.lock:
             doc = self._load_doc()
@@ -34,14 +33,14 @@ class JobStore:
                 jobs.append(job)
             return jobs
 
-    def save_jobs(self, jobs: List[dict]) -> None:
+    def save_jobs(self, jobs: list[dict]) -> None:
         with self.lock:
             doc = self._load_doc()
             doc["jobs"] = list(jobs)
             self._save_doc(doc)
 
-    def add_jobs(self, new_jobs: List[dict],
-                 post_data: Optional[dict] = None) -> None:
+    def add_jobs(self, new_jobs: list[dict],
+                 post_data: dict | None = None) -> None:
         """Append jobs to the plan; post_data stored once."""
         if not new_jobs and post_data is None:
             return
@@ -99,7 +98,7 @@ class JobStore:
 
     # -- raw io (call under the lock) --------------------------------------------
 
-    def _valid_rows(self, raw) -> List[dict]:
+    def _valid_rows(self, raw) -> list[dict]:
         # skip junk rows instead of letting one stall the queue
         rows = [j for j in raw
                 if isinstance(j, dict) and isinstance(j.get("post_time"), str)
