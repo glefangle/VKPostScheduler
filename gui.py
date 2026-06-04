@@ -6,14 +6,35 @@ import os
 from datetime import datetime
 
 from PyQt5.QtCore import QDate, Qt, pyqtSignal
-from PyQt5.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDateEdit, QDialog, QDialogButtonBox,
-    QFileDialog, QFormLayout, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
-    QProgressBar, QPushButton, QSpinBox, QTabWidget, QTextEdit, QTimeEdit,
-    QVBoxLayout, QWidget,
-)
 from PyQt5.QtGui import QFont
+from PyQt5.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDateEdit,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QTextEdit,
+    QTimeEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from config import Group
 from scheduler import PostData, PostScheduler
@@ -21,7 +42,7 @@ from scheduler import PostData, PostScheduler
 log = logging.getLogger(__name__)
 
 APP_TITLE = "VK Post Scheduler"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 GIF_TRANSFORM_LABEL = "Transform GIFs to VK limits (0.66:1 - 2.5:1)"
 
 BUTTON = """
@@ -216,7 +237,9 @@ class ErrorDialog(QDialog):
         return "\n".join(lines)
 
     def _copy(self):
-        QApplication.clipboard().setText(self._format(self.details))
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self._format(self.details))
 
 
 class MainWindow(QMainWindow):
@@ -229,8 +252,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.scheduler = scheduler
 
-        self.photo_paths = []
-        self.times = []
+        self.photo_paths: list[str] = []
+        self.times: list[str] = []
 
         scheduler.on_status = self.status_sig.emit
         scheduler.on_progress = self.progress_sig.emit
@@ -289,7 +312,9 @@ class MainWindow(QMainWindow):
                 stop:0 #4a90e2, stop:1 #357abd);
         }
         """ + INPUT
-        QApplication.instance().setStyleSheet(qss)
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.setStyleSheet(qss)
 
     def _build_ui(self):
         central = QWidget()
@@ -306,7 +331,7 @@ class MainWindow(QMainWindow):
 
         footer = QLabel(f"{APP_TITLE} v{APP_VERSION}")
         footer.setStyleSheet("color: #6c757d; font-size: 11px;")
-        root.addWidget(footer, 0, Qt.AlignRight)
+        root.addWidget(footer, 0, Qt.AlignmentFlag.AlignRight)
 
     def _post_tab(self):
         tab = QWidget()
@@ -407,7 +432,7 @@ class MainWindow(QMainWindow):
         row.addStretch()
         times.addLayout(row)
         self.times_list = QListWidget()
-        self.times_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.times_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         times.addWidget(self.times_list)
         layout.addWidget(times_box)
 
@@ -460,7 +485,7 @@ class MainWindow(QMainWindow):
         self.jobs_list = QListWidget()
         # uniform item sizes; per-item hints freeze the gui on big queues
         self.jobs_list.setUniformItemSizes(True)
-        self.jobs_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.jobs_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         vbox.addWidget(self.jobs_list)
         layout.addWidget(jobs_box)
 
@@ -736,7 +761,7 @@ class MainWindow(QMainWindow):
         item = self.jobs_list.itemAt(pos)
         if not item:
             return
-        post_time = item.data(Qt.UserRole)
+        post_time = item.data(Qt.ItemDataRole.UserRole)
         menu = QMenu(self)
         menu.addAction("Remove job", lambda: self._remove_job(post_time))
         menu.exec_(self.jobs_list.mapToGlobal(pos))
@@ -758,7 +783,9 @@ class MainWindow(QMainWindow):
         stamp = datetime.now().strftime("%H:%M:%S")
         # escape angle brackets, qt would eat them
         self.log_view.append(f"[{stamp}] {html.escape(message)}")
-        self.log_view.verticalScrollBar().setValue(self.log_view.verticalScrollBar().maximum())
+        bar = self.log_view.verticalScrollBar()
+        if bar is not None:
+            bar.setValue(bar.maximum())
 
     def _refresh_progress(self):
         stats = self.scheduler.stats()
@@ -781,7 +808,7 @@ class MainWindow(QMainWindow):
                     if job.get("photo_total", 1) > 1:
                         line += f"  [{job['photo_no']}/{job['photo_total']}]"
                 item = QListWidgetItem(line)
-                item.setData(Qt.UserRole, job["post_time"])
+                item.setData(Qt.ItemDataRole.UserRole, job["post_time"])
                 self.jobs_list.addItem(item)
 
     def _show_error(self, message: str, details: dict):

@@ -1,7 +1,6 @@
 """The contract every posting backend implemments."""
 
 from abc import ABC, abstractmethod
-from typing import Optional
 
 
 class ClientError(Exception):
@@ -33,11 +32,11 @@ class PostClient(ABC):
 
     @abstractmethod
     def upload_gif(self, api, path: str, target_id: str,
-                   title: Optional[str] = None, transform: bool = True) -> str:
+                   title: str | None = None, transform: bool = True) -> str:
         """Upload one gif, same contract as upload_photo."""
 
     @abstractmethod
-    def post(self, api, target_id: str, message: Optional[str],
-             attachment: Optional[str], publish_ts: Optional[int],
-             post_data: Optional[dict] = None) -> dict:
+    def post(self, api, target_id: str, message: str | None,
+             attachment: str | None, publish_ts: int | None,
+             post_data: dict | None = None) -> dict:
         """Create the post; publish_ts schedules it, None posts right away."""
