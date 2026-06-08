@@ -3,7 +3,6 @@
 import logging
 import os
 import re
-from typing import Dict, Optional
 
 import requests
 import vk_api
@@ -27,7 +26,7 @@ class VKClient(PostClient):
 
     def __init__(self):
         self.gif = GIFTransformer(self.GIF_MIN_RATIO, self.GIF_MAX_RATIO, tag="vk")
-        self._sessions: Dict[str, object] = {}
+        self._sessions: dict[str, object] = {}
 
     def api_for(self, credential: str):
         """Authenticated api object per token, cached."""
@@ -63,7 +62,7 @@ class VKClient(PostClient):
         try:
             return abs(int(str(target_id).strip()))
         except (TypeError, ValueError):
-            raise ValueError(f"Invalid group ID '{target_id}': must be a number")
+            raise ValueError(f"Invalid group ID '{target_id}': must be a number") from None
 
     # -- uploading --------------------------------------------------------
 
@@ -85,9 +84,9 @@ class VKClient(PostClient):
         return f"photo{saved['owner_id']}_{saved['id']}"
 
     def upload_gif(self, api, path: str, target_id: str,
-                   title: Optional[str] = None, transform: bool = True) -> str:
+                   title: str | None = None, transform: bool = True) -> str:
         """GIFs go up as documents."""
-        group_id = self._group_id(target_id)
+        self._group_id(target_id)
         actual_path = path
         temp_created = False
         if transform:
@@ -97,7 +96,8 @@ class VKClient(PostClient):
             # no group_id on purpose, see the VK docs for docs.getWallUploadServer
             server = self._call(api.docs.getWallUploadServer)
             with open(actual_path, "rb") as fh:
-                resp = requests.post(server["upload_url"], files={"file": fh}, timeout=UPLOAD_TIMEOUT)
+                resp = requests.post(server["upload_url"], files={"file": fh},
+                                     timeout=UPLOAD_TIMEOUT)
             resp.raise_for_status()
             doc_data = resp.json()
 
@@ -126,13 +126,13 @@ class VKClient(PostClient):
 
     # -- posting ----------------------------------------------------------
 
-    def post(self, api, target_id: str, message: Optional[str],
-             attachment: Optional[str], publish_ts: Optional[int],
-             post_data: Optional[dict] = None) -> dict:
+    def post(self, api, target_id: str, message: str | None,
+             attachment: str | None, publish_ts: int | None,
+             post_data: dict | None = None) -> dict:
         if not message and not attachment:
             raise ValueError("nothing to post: need text or an attachment")
 
-        params = {"owner_id": -self._group_id(target_id)}
+        params: dict = {"owner_id": -self._group_id(target_id)}
         if publish_ts:
             params["publish_date"] = publish_ts
         if message:

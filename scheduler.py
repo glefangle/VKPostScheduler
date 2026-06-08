@@ -4,10 +4,10 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from queue import Empty, Queue
-from typing import Callable, List, Optional, Tuple
 
 from config import ConfigManager
 from job_store import JobStore
@@ -34,23 +34,24 @@ class PostData:
 
 
 class PostScheduler:
-    def __init__(self, config: ConfigManager = None, store: JobStore = None,
-                 client: PostClient = None):
+    def __init__(self, config: ConfigManager | None = None,
+                 store: JobStore | None = None,
+                 client: PostClient | None = None):
         self.config = config or ConfigManager("config.json")
         self.store = store or JobStore()
         self.client = client
 
         self.queue: Queue = Queue()
         # gui hooks; always called from the worker thread
-        self.on_status: Optional[Callable[[str], None]] = None
-        self.on_progress: Optional[Callable[[], None]] = None
-        self.on_error: Optional[Callable[[str, dict], None]] = None
+        self.on_status: Callable[[str], None] | None = None
+        self.on_progress: Callable[[], None] | None = None
+        self.on_error: Callable[[str, dict], None] | None = None
 
-        self._worker_thread: Optional[threading.Thread] = None
+        self._worker_thread: threading.Thread | None = None
         self._stop = threading.Event()
         # bumped on plan replacement; old-plan jobs still queued are dropped
         self._generation = 0
-        self._cancelled_post_times = set()
+        self._cancelled_post_times: set[str] = set()
 
         self._total = 0
         self._ok = 0
@@ -60,7 +61,7 @@ class PostScheduler:
     # -- scheduling -----------------------------------------------------------
 
     def validate(self, post: PostData, start_date: str, end_date: str,
-                 times: List[str]) -> Optional[str]:
+                 times: list[str]) -> str | None:
         """Return a human-readable problem, or None when input is fine."""
         token_name, group_name = self.config.get_selection()
         if not token_name:
@@ -117,7 +118,7 @@ class PostScheduler:
         return True, None
 
     def _build_jobs(self, post: PostData, start_date: str, end_date: str,
-                    times: List[str], token_name: str, group_name: str):
+                    times: list[str], token_name: str, group_name: str):
         jobs = []
         exhausted = False
         photo_idx = None
@@ -219,16 +220,17 @@ class PostScheduler:
 
     def stop(self, preserve_jobs: bool = True):
         """Stop the worker; pending jobs stay on disk unless preserve_jobs=False."""
-        running = self._worker_thread and self._worker_thread.is_alive()
+        thread = self._worker_thread
+        running = thread is not None and thread.is_alive()
         self._stop.set()
         self._pause.clear()
 
         if not preserve_jobs:
             self._throw_out_plan()
 
-        if running:
-            self._worker_thread.join(timeout=5)
-            if self._worker_thread.is_alive():
+        if running and thread is not None:
+            thread.join(timeout=5)
+            if thread.is_alive():
                 log.warning("worker thread did not stop within 5s")
         self._progress()
 
@@ -247,7 +249,7 @@ class PostScheduler:
             target=self._worker, name="poster", daemon=True)
         self._worker_thread.start()
 
-    def current_jobs(self) -> List[dict]:
+    def current_jobs(self) -> list[dict]:
         """Pending jobs with display info for the status tab."""
         result = []
         for job in self.store.load_jobs():
@@ -356,20 +358,23 @@ class PostScheduler:
         return int(dt.timestamp())
 
     @staticmethod
-    def _media_for(job: dict, post_data: dict) -> Optional[str]:
+    def _media_for(job: dict, post_data: dict) -> str | None:
         paths = post_data.get("photo_paths", [])
         if "photo_index" in job and 0 <= job["photo_index"] < len(paths):
             return paths[job["photo_index"]]
         return post_data.get("photo_path")
 
     def _upload_media(self, api, path: str, target_id: str, post_data: dict) -> str:
+        client = self.client
+        if client is None:
+            raise RuntimeError("no posting client configured")
         if not os.path.exists(path):
             raise FileNotFoundError(path)
         ext = os.path.splitext(path)[1].lower()
         if ext in PHOTO_EXTS:
-            return self.client.upload_photo(api, path, target_id)
+            return client.upload_photo(api, path, target_id)
         if ext == ".gif":
-            return self.client.upload_gif(
+            return client.upload_gif(
                 api, path, target_id,
                 title=post_data.get("gif_name") or None,
                 transform=post_data.get("gif_transform", True))

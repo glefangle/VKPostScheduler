@@ -1,19 +1,19 @@
 import json
 from datetime import datetime
+from typing import Any
 
 import pytest
 
+from config import ConfigManager, Group, MemoryStore
 from job_store import JobStore
 from posting_client import ClientError, PublishTimeInPastError
 from scheduler import ROTATION_KEY, PostData, PostScheduler
-from config import Group, ConfigManager, MemoryStore
 
 
 @pytest.fixture
 def sched(tmp_path, monkeypatch):
     cfg = ConfigManager(str(tmp_path / "config.json"), MemoryStore())
-    cfg.add_token("t1", "secret")
-    cfg.get_token("t1").add_group(Group("g1", "42"))
+    add_token_with_group(cfg, "t1", "g1", "42")
     cfg.set_selection("t1", "g1")
 
     s = PostScheduler(config=cfg, store=JobStore(str(tmp_path / "jobs.json")))
@@ -22,8 +22,17 @@ def sched(tmp_path, monkeypatch):
     return s
 
 
+def add_token_with_group(cfg, token_name, group_name, group_id):
+    """add_token + one group, with the None-checks spelled out."""
+    cfg.add_token(token_name, "secret")
+    token = cfg.get_token(token_name)
+    assert token is not None
+    token.add_group(Group(group_name, group_id))
+    return token
+
+
 def make_post(**kw):
-    defaults = dict(text="hello", photo_paths=[], different_posts=False)
+    defaults: dict[str, Any] = dict(text="hello", photo_paths=[], different_posts=False)
     defaults.update(kw)
     return PostData(**defaults)
 
@@ -54,12 +63,14 @@ def test_validate_no_token(tmp_path):
     cfg = ConfigManager(str(tmp_path / "c.json"), MemoryStore())
     s = PostScheduler(config=cfg, store=JobStore(str(tmp_path / "j.json")))
     problem = s.validate(make_post(), "2026-01-01", "2026-01-01", ["09:00"])
+    assert problem is not None
     assert "token" in problem.lower()
 
 
 def test_validate_no_group(sched):
     sched.config.set_selection("t1", None)
     problem = sched.validate(make_post(), "2026-01-01", "2026-01-01", ["09:00"])
+    assert problem is not None
     assert "target" in problem.lower()
 
 
