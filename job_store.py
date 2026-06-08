@@ -5,6 +5,7 @@ import os
 import threading
 
 import jsonio
+import paths
 
 log = logging.getLogger(__name__)
 
@@ -12,8 +13,8 @@ log = logging.getLogger(__name__)
 class JobStore:
     """Queued jobs, plan content and rotations in one locked json file."""
 
-    def __init__(self, path: str = "jobs_state.json"):
-        self.path = path
+    def __init__(self, path: str | None = None):
+        self.path = path or paths.data_path("jobs_state.json")
         self.lock = threading.RLock()
         # (mtime_ns, size) -> parsed doc; skip re-parsing when unchanged
         self._cache: tuple[tuple[int, int], dict] | None = None
