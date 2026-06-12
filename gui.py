@@ -724,7 +724,6 @@ class MainWindow(QMainWindow):
         different = self.different_check.isChecked()
         post = PostData(
             text=self.text_edit.toPlainText().strip(),
-            photo_path=self.photo_paths[0] if self.photo_paths else None,
             photo_paths=list(self.photo_paths),
             different_posts=different,
             gif_name=self.gif_name_edit.text().strip(),

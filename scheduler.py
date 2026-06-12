@@ -26,8 +26,7 @@ ROTATION_KEY = "photos"
 @dataclass
 class PostData:
     text: str = ""
-    photo_path: Optional[str] = None
-    photo_paths: List[str] = field(default_factory=list)
+    photo_paths: list[str] = field(default_factory=list)
     different_posts: bool = False
     gif_name: str = ""
     gif_transform: bool = True
@@ -81,12 +80,12 @@ class PostScheduler:
             return "Start date is after end date."
         if not times:
             return "Add at least one posting time."
-        if not (post.text and post.text.strip()) and not post.photo_path and not post.photo_paths:
+        if not (post.text and post.text.strip()) and not post.photo_paths:
             return "Post needs text or at least one image."
         return None
 
     def schedule(self, post: PostData, start_date: str, end_date: str,
-                 times: List[str]) -> Tuple[bool, Optional[str]]:
+                 times: list[str]) -> tuple[bool, str | None]:
         """Queue one job per date/time pair. Replaces any pending plan."""
         error = self.validate(post, start_date, end_date, times)
         if error:
@@ -157,7 +156,6 @@ class PostScheduler:
         """The plan's content as one shaared copy, stored once."""
         return {
             "text": post.text,
-            "photo_path": post.photo_path,
             "photo_paths": list(post.photo_paths),
             "different_posts": post.different_posts,
             "gif_name": post.gif_name,
@@ -259,14 +257,13 @@ class PostScheduler:
                 "attempt": job.get("attempt", 0),
                 "status": "pending",
             }
-            post_data = job.get("post_data", {})
-            paths = post_data.get("photo_paths", [])
+            paths = self._plan_photo_paths(job.get("post_data", {}))
             if "photo_index" in job and 0 <= job["photo_index"] < len(paths):
                 info["photo"] = os.path.basename(paths[job["photo_index"]])
                 info["photo_no"] = job["photo_index"] + 1
                 info["photo_total"] = len(paths)
-            elif post_data.get("photo_path"):
-                info["photo"] = os.path.basename(post_data["photo_path"])
+            elif paths:
+                info["photo"] = os.path.basename(paths[0])
                 info["photo_no"] = 1
                 info["photo_total"] = 1
             result.append(info)
@@ -359,11 +356,19 @@ class PostScheduler:
         return int(dt.timestamp())
 
     @staticmethod
-    def _media_for(job: dict, post_data: dict) -> str | None:
-        paths = post_data.get("photo_paths", [])
+    def _plan_photo_paths(post_data: dict) -> list[str]:
+        """The plan's images; pre-1.2 plans kept a single photo_path."""
+        paths = post_data.get("photo_paths") or []
+        if not paths and post_data.get("photo_path"):
+            paths = [post_data["photo_path"]]
+        return paths
+
+    @classmethod
+    def _media_for(cls, job: dict, post_data: dict) -> str | None:
+        paths = cls._plan_photo_paths(post_data)
         if "photo_index" in job and 0 <= job["photo_index"] < len(paths):
             return paths[job["photo_index"]]
-        return post_data.get("photo_path")
+        return paths[0] if paths else None
 
     def _upload_media(self, api, path: str, target_id: str, post_data: dict) -> str:
         client = self.client

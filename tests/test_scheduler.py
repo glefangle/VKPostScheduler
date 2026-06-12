@@ -143,11 +143,23 @@ def test_different_posts_hand_out_photos_in_order(sched):
 
 
 def test_same_photo_for_every_slot(sched):
-    sched.schedule(make_post(photo_path="one.jpg"),
+    sched.schedule(make_post(photo_paths=["one.jpg"]),
                    "2099-01-01", "2099-01-02", ["09:00"])
     jobs = sched.store.load_jobs()
     assert len(jobs) == 2
     assert all("photo_index" not in j for j in jobs)
+
+
+def test_legacy_plan_with_single_photo_path(sched):
+    # pre-1.2 plans keep photo_path instead of a list
+    job = {"post_time": "2099-01-01 09:00", "attempt": 0,
+           "token_name": "t1", "group_name": "g1",
+           "post_data": {"text": "t", "photo_path": "old.jpg"}}
+    sched.store.save_jobs([job])
+    loaded = sched.store.load_jobs()[0]
+    assert PostScheduler._media_for(loaded, loaded["post_data"]) == "old.jpg"
+    info = sched.current_jobs()[0]
+    assert info["photo"] == "old.jpg"
 
 
 def test_rotation_restarts_for_new_plan(sched):
@@ -195,7 +207,7 @@ def test_execute_routes_gif_with_its_options(sched, tmp_path):
     sched.client = client
 
     sched.schedule(
-        make_post(photo_path=str(gif), gif_name="cat", gif_transform=False),
+        make_post(photo_paths=[str(gif)], gif_name="cat", gif_transform=False),
         "2099-01-01", "2099-01-01", ["09:00"])
     sched._execute(sched.store.load_jobs()[0])
 
