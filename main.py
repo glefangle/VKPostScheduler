@@ -1,17 +1,20 @@
 """Entry point: logging, crash handling, the Qt loop."""
 
 import logging
+import os
 import sys
 import traceback
 from datetime import datetime
-import os
 
+import paths
+from job_store import JobStore
 from scheduler import PostScheduler
 
 
 def setup_logging():
-    os.makedirs("logs", exist_ok=True)
-    log_file = f"logs/app_{datetime.now():%Y%m%d_%H%M%S}.log"
+    log_dir = paths.data_path("logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"app_{datetime.now():%Y%m%d_%H%M%S}.log")
 
     fmt = logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s")
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
@@ -24,7 +27,7 @@ def setup_logging():
     root.addHandler(file_handler)
     root.addHandler(console)
 
-    errors = logging.FileHandler("error.log", encoding="utf-8")
+    errors = logging.FileHandler(paths.data_path("error.log"), encoding="utf-8")
     errors.setLevel(logging.ERROR)
     errors.setFormatter(fmt)
     root.addHandler(errors)
@@ -37,28 +40,31 @@ def handle_exception(exc_type, exc_value, exc_traceback):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
     logging.critical("uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
-    with open("crash.log", "a", encoding="utf-8") as f:
+    with open(paths.data_path("crash.log"), "a", encoding="utf-8") as f:
         traceback.print_exception(exc_type, exc_value, exc_traceback, file=f)
 
 
 def main():
+    paths.migrate_legacy_files()
     log = setup_logging()
     sys.excepthook = handle_exception
     log.info("starting")
 
-    from config import ConfigManager
-    from vk_client import VKClient
-
     from PyQt5.QtWidgets import QApplication
+
+    from config import ConfigManager
     from gui import APP_TITLE, APP_VERSION, MainWindow
+    from vk_client import VKClient
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
     app.setApplicationVersion(APP_VERSION)
 
     scheduler = PostScheduler(
-        config=ConfigManager("vk_config.json", service_name="VKPostScheduler"),
-        client=VKClient())
+        config=ConfigManager(paths.data_path("vk_config.json"),
+                             service_name="VKPostScheduler"),
+        client=VKClient(),
+        store=JobStore(paths.data_path("jobs_state.json")))
     window = MainWindow(scheduler)
     window.show()
     rc = app.exec_()

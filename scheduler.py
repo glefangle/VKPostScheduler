@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from queue import Empty, Queue
 
+import paths
 from config import ConfigManager
 from job_store import JobStore
 from posting_client import ClientError, PostClient, PublishTimeInPastError
@@ -37,8 +38,8 @@ class PostScheduler:
     def __init__(self, config: ConfigManager | None = None,
                  store: JobStore | None = None,
                  client: PostClient | None = None):
-        self.config = config or ConfigManager("config.json")
-        self.store = store or JobStore()
+        self.config = config or ConfigManager(paths.data_path("vk_config.json"))
+        self.store = store or JobStore(paths.data_path("jobs_state.json"))
         self.client = client
 
         self.queue: Queue = Queue()
