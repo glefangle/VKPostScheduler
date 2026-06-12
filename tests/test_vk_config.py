@@ -109,6 +109,10 @@ def test_group_schedule_time_validation(cfg):
         cfg.set_group_schedule("t", "g", ["25:00"])
     with pytest.raises(ValueError):
         cfg.set_group_schedule("t", "g", ["abc"])
+    with pytest.raises(ValueError):
+        cfg.set_group_schedule("t", "g", ["09:60"])
+    with pytest.raises(ValueError):
+        cfg.set_group_schedule("t", "g", ["9am"])
     cfg.set_group_schedule("t", "g", ["09:30", "21:00"])
     assert cfg.get_group_schedule("t", "g") == ["09:30", "21:00"]
 

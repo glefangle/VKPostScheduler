@@ -271,8 +271,10 @@ class ConfigManager:
     def _check_time(t: str) -> None:
         try:
             h, m = t.split(":")
-            assert 0 <= int(h) <= 23 and 0 <= int(m) <= 59
-        except (ValueError, IndexError, AssertionError):
+            hour, minute = int(h), int(m)
+        except (ValueError, AttributeError):
+            raise ValueError(f"Bad time '{t}', expected HH:MM") from None
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
             raise ValueError(f"Bad time '{t}', expected HH:MM")
 
     # -- persistence ---------------------------------------------------------
