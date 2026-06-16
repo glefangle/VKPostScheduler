@@ -85,3 +85,56 @@ def test_close_event_stops_the_scheduler(qtbot, window):
     window.close()
     assert window.scheduler._stop.is_set()
 
+
+# -- dialogs -----------------------------------------------------------------
+
+def test_token_dialog_saves_token(qtbot, window, boxes):
+    dialog = TokenDialog(window, window.scheduler.config)
+    qtbot.addWidget(dialog)
+    dialog.name_edit.setText("t2")
+    dialog.value_edit.setText("v2")
+    dialog._save()
+    assert "t2" in window.scheduler.config.token_names()
+    assert boxes == []
+
+
+def test_token_dialog_rejects_empty_input(qtbot, window, boxes):
+    dialog = TokenDialog(window, window.scheduler.config)
+    qtbot.addWidget(dialog)
+    dialog.name_edit.setText("t2")
+    dialog._save()
+    assert "t2" not in window.scheduler.config.token_names()
+    assert boxes[0][0] == "warning"
+
+
+def test_group_dialog_validates_group_id(qtbot, window, boxes):
+    token = window.scheduler.config.get_token("t1")
+    dialog = GroupDialog(window, token)
+    qtbot.addWidget(dialog)
+
+    dialog.name_edit.setText("g2")
+    dialog.id_edit.setText("abc")
+    dialog._save()
+    assert token.get_group("g2") is None
+    assert boxes[0][0] == "warning"
+
+    dialog.id_edit.setText("-123456")
+    dialog._save()
+    assert token.get_group("g2").group_id == "-123456"
+
+
+def test_error_dialog_formats_details_and_copies(qtbot, window):
+    details = {"post_time": "2099-01-01 09:00", "group": "g1",
+               "attempt": 1, "error": "ClientError: captcha"}
+    dialog = ErrorDialog(window, "Posting error for 2099-01-01 09:00", details)
+    qtbot.addWidget(dialog)
+
+    text = dialog._format(details)
+    assert "2099-01-01 09:00" in text
+    assert "captcha" in text
+
+    dialog._copy()
+    clipboard = QApplication.clipboard()
+    assert clipboard is not None
+    assert "2099-01-01 09:00" in clipboard.text()
+
