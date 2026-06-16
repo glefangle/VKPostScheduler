@@ -74,3 +74,14 @@ def test_window_builds_with_three_tabs(qtbot, window):
 def test_window_loads_selection_from_config(qtbot, window):
     assert window.token_combo.currentText() == "t1"
     assert window.group_combo.currentText() == "g1"
+
+
+def test_status_log_escapes_html(qtbot, window):
+    window._log("<b>bold</b>")
+    assert "<b>bold</b>" in window.log_view.toPlainText()
+
+
+def test_close_event_stops_the_scheduler(qtbot, window):
+    window.close()
+    assert window.scheduler._stop.is_set()
+
