@@ -138,3 +138,96 @@ def test_error_dialog_formats_details_and_copies(qtbot, window):
     assert clipboard is not None
     assert "2099-01-01 09:00" in clipboard.text()
 
+
+# -- schedule tab --------------------------------------------------------------
+
+def test_add_time_persists_to_group_schedule(qtbot, window):
+    window.time_edit.setTime(QTime(9, 30))
+    window._add_time()
+    assert window.times == ["09:30"]
+    assert window.scheduler.config.get_group_schedule("t1", "g1") == ["09:30"]
+
+
+def test_duplicate_time_is_not_added(qtbot, window):
+    window.time_edit.setTime(QTime(9, 30))
+    window._add_time()
+    window._add_time()
+    assert window.times == ["09:30"]
+    assert window.times_list.count() == 1
+
+
+def test_remove_time_persists_removal(qtbot, window):
+    window.time_edit.setTime(QTime(9, 30))
+    window._add_time()
+    window.time_edit.setTime(QTime(10, 0))
+    window._add_time()
+    window.times_list.setCurrentRow(0)
+    window._remove_time()
+    assert window.times == ["10:00"]
+    assert window.scheduler.config.get_group_schedule("t1", "g1") == ["10:00"]
+
+
+def test_group_switch_saves_schedule_under_previous_group(qtbot, window, sched):
+    window.time_edit.setTime(QTime(9, 30))
+    window._add_time()
+    sched.config.get_token("t1").add_group(Group("g2", "43"))
+
+    # switch through the combo signal, as in the real app
+    window.group_combo.addItem("g2")
+    window.group_combo.setCurrentText("g2")
+    assert window.times == []  # g2 has no schedule yet
+
+    window.group_combo.setCurrentText("g1")
+    # the empty g2 state must not overwrite g1's saved schedule
+    assert sched.config.get_group_schedule("t1", "g1") == ["09:30"]
+    assert window.times == ["09:30"]
+
+
+# -- scheduling from the gui ------------------------------------------------------
+
+def test_schedule_queues_jobs(qtbot, window, sched, boxes):
+    window.text_edit.setPlainText("hello")
+    window.time_edit.setTime(QTime(9, 0))
+    window._add_time()
+
+    window._schedule()
+
+    assert sched.store.pending_count() == 1
+    job = sched.store.load_jobs()[0]
+    assert job["post_data"]["text"] == "hello"
+    assert boxes[0][0] == "information"
+
+
+def test_schedule_without_times_shows_warning(qtbot, window, sched, boxes):
+    window.text_edit.setPlainText("hello")
+    window._schedule()
+    assert sched.store.pending_count() == 0
+    assert boxes[0][0] == "warning"
+    assert "time" in boxes[0][1].lower()
+
+
+# -- status tab ----------------------------------------------------------------
+
+def test_refresh_progress_shows_counters(qtbot, window, sched):
+    sched.schedule(PostData(text="hi"), "2099-01-01", "2099-01-02", ["09:00"])
+
+    window._refresh_progress()
+
+    assert "Queued: 2" in window.counters.text()
+    assert window.progress.maximum() == 2
+
+
+def test_remove_job_from_jobs_list(qtbot, window, sched, boxes):
+    sched.schedule(PostData(text="hi"), "2099-01-01", "2099-01-01", ["09:00"])
+    post_time = sched.store.load_jobs()[0]["post_time"]
+
+    window._remove_job(post_time)
+
+    assert sched.store.pending_count() == 0
+    assert boxes[0][0] == "question"
+
+
+def test_remove_missing_job_warns(qtbot, window, boxes):
+    window._remove_job("2099-01-01 09:00")
+    # confirm dialog first, then the "not found" warning
+    assert [kind for kind, _ in boxes] == ["question", "warning"]
