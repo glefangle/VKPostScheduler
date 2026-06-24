@@ -4,7 +4,6 @@ import logging
 import math
 import os
 import tempfile
-from typing import Tuple
 
 from PIL import Image, ImageSequence
 
@@ -23,7 +22,7 @@ class GIFTransformer:
             return False
         return self.min_ratio <= width / height <= self.max_ratio
 
-    def target_size(self, width: int, height: int) -> Tuple[int, int]:
+    def target_size(self, width: int, height: int) -> tuple[int, int]:
         """Dimensions to pad/crop to."""
         if self.compliant(width, height):
             return width, height

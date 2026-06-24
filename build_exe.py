@@ -112,12 +112,12 @@ def build():
 
     exe = os.path.join(ROOT, "dist", APP_NAME + ".exe")
     if not os.path.exists(exe):
-        print("\nBUILD FAILED: %s not found" % exe)
+        print(f"\nBUILD FAILED: {exe} not found")
         return 1
 
     size_mb = os.path.getsize(exe) / (1024 * 1024)
     print("\n" + "=" * 50)
-    print("  Build OK: dist\\%s.exe  (%.1f MB)" % (APP_NAME, size_mb))
+    print(f"  Build OK: dist\\{APP_NAME}.exe  ({size_mb:.1f} MB)")
     print("=" * 50)
     return 0
 

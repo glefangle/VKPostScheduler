@@ -23,7 +23,7 @@ To inspect or remove stored tokens manually: Control Panel > Credential Manager 
 
 ## Requirements
 
-- Python 3.9 or newer
+- Python 3.10 or newer
 - Windows (the code itself also runs on Linux/macOS)
 
 ## Installation
@@ -64,22 +64,31 @@ Behaviors worth knowing:
 
 ## Configuration files
 
+Runtime files live in the per-user data directory (`%APPDATA%\VKPostScheduler` on Windows, `~/.local/share/VKPostScheduler` elsewhere), not in the working directory. On the first start after an upgrade, files left by older versions are moved there automatically.
+
 | File | Purpose |
 |---|---|
-| `vk_config.json` | Token names, groups, per-group schedules and default text. No secrets. |
+| `<data dir>\vk_config.json` | Token names, groups, per-group schedules and default text. No secrets. |
 | Windows Credential Manager | Token values, entries under `VKPostScheduler` |
-| `jobs_state.json` | Persistent job queue and photo rotation state |
-| `logs/app_*.log` | Application log |
-| `error.log` | Errors only |
-| `crash.log` | Uncaught exceptions |
+| `<data dir>\jobs_state.json` | Persistent job queue and photo rotation state |
+| `<data dir>\logs\app_*.log` | Application log |
+| `<data dir>\error.log` | Errors only |
+| `<data dir>\crash.log` | Uncaught exceptions |
 
 If a config file gets corrupted, the app moves it aside to `*.corrupt.bak` and starts with an empty one instead of wiping it silently.
 
 ## Tests
 
 ```bash
-python -m pip install pytest
+python -m pip install -r requirements-dev.txt
 python -m pytest tests
+```
+
+The suite covers the queue core and the GUI (PyQt5, run offscreen via pytest-qt). Ruff and mypy run in CI (`.github/workflows/ci.yml`); locally:
+
+```bash
+ruff check .
+mypy .
 ```
 
 ## Building a standalone executable
@@ -98,11 +107,12 @@ gui.py               PyQt5 interface (VK texts/labels live in constants at the t
 scheduler.py         Job queue, worker thread, retries, photo rotation
 job_store.py         Persistence for the queue (jobs_state.json)
 jsonio.py            Shared json io for the state files (atomic writes, corrupt backups)
+paths.py             Per-user data dir and legacy file migration
 posting_client.py    PostClient contract and shared error types
 vk_client.py         VK backend: vk_api calls, VK error-code mapping
 config.py            Token/target configuration, keyring storage
 gif_transformer.py   GIF aspect ratio fixing (Pillow), limits passed in by the client
-tests/               pytest suite
+tests/               pytest suite (core + GUI)
 ```
 
 The queue core (`scheduler.py`, `job_store.py`, `jsonio.py`, `config.py`, `posting_client.py`) does not import `vk_api`: it is imported only inside `vk_client.py`, so the backend is the only VK-specific module.
@@ -116,6 +126,13 @@ The queue core (`scheduler.py`, `job_store.py`, `jsonio.py`, `config.py`, `posti
 - Check `error.log` and the Status tab for anything else.
 
 ## Changelog
+
+### 1.2.0
+
+- Runtime files moved to the per-user data directory; files from older versions are migrated on first start. Nothing is written to the working directory anymore.
+- The single-photo `photo_path` plan field is unified into `photo_paths`; plans stored by older versions still load.
+- Time validation no longer relies on `assert`.
+- Internal: typing checked with mypy, style checked with ruff (both run in CI along with the test suite on Linux and Windows); GUI covered by pytest-qt tests; Python 3.10+ required.
 
 ### 1.1.0
 
