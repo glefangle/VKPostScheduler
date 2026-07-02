@@ -76,3 +76,7 @@ def main() -> int:
 
     log.info("closed")
     return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())
