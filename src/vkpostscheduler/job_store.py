@@ -3,11 +3,14 @@
 import logging
 import os
 import threading
+from typing import Any
 
-import jsonio
-import paths
+from vkpostscheduler import jsonio, paths
 
 log = logging.getLogger(__name__)
+
+# a queued job is a plain json dict keyed by post_time
+Job = dict[str, Any]
 
 
 class JobStore:
@@ -17,31 +20,31 @@ class JobStore:
         self.path = path or paths.data_path("jobs_state.json")
         self.lock = threading.RLock()
         # (mtime_ns, size) -> parsed doc; skip re-parsing when unchanged
-        self._cache: tuple[tuple[int, int], dict] | None = None
+        self._cache: tuple[tuple[int, int], dict[str, Any]] | None = None
 
     # -- jobs ----------------------------------------------------------------
 
-    def load_jobs(self) -> list[dict]:
+    def load_jobs(self) -> list[Job]:
         """Jobs with their post_data reattached from the plan's shared copy."""
         with self.lock:
             doc = self._load_doc()
             shared = doc.get("post_data")
             jobs = []
             for row in self._valid_rows(doc.get("jobs", [])):
-                job = dict(row)
+                job: Job = dict(row)
                 if "post_data" not in job and isinstance(shared, dict):
                     job["post_data"] = dict(shared)  # own copy, not the cached one
                 jobs.append(job)
             return jobs
 
-    def save_jobs(self, jobs: list[dict]) -> None:
+    def save_jobs(self, jobs: list[Job]) -> None:
         with self.lock:
             doc = self._load_doc()
             doc["jobs"] = list(jobs)
             self._save_doc(doc)
 
-    def add_jobs(self, new_jobs: list[dict],
-                 post_data: dict | None = None) -> None:
+    def add_jobs(self, new_jobs: list[Job],
+                 post_data: dict[str, Any] | None = None) -> None:
         """Append jobs to the plan; post_data stored once."""
         if not new_jobs and post_data is None:
             return
@@ -99,7 +102,7 @@ class JobStore:
 
     # -- raw io (call under the lock) --------------------------------------------
 
-    def _valid_rows(self, raw) -> list[dict]:
+    def _valid_rows(self, raw: Any) -> list[Job]:
         # skip junk rows instead of letting one stall the queue
         rows = [j for j in raw
                 if isinstance(j, dict) and isinstance(j.get("post_time"), str)
@@ -109,14 +112,14 @@ class JobStore:
                         len(raw) - len(rows), self.path)
         return rows
 
-    def _stat_key(self):
+    def _stat_key(self) -> tuple[int, int] | None:
         try:
             st = os.stat(self.path)
         except OSError:
             return None
         return (st.st_mtime_ns, st.st_size)
 
-    def _load_doc(self) -> dict:
+    def _load_doc(self) -> dict[str, Any]:
         key = self._stat_key()
         if key is not None and self._cache and self._cache[0] == key:
             return self._cache[1]
@@ -127,7 +130,8 @@ class JobStore:
         self._cache = (key, doc)
         return doc
 
-    def _save_doc(self, doc: dict) -> None:
+    def _save_doc(self, doc: dict[str, Any]) -> None:
+        # a silent write failure loses posts; tmp+replace guards it
         if not jsonio.write_json(self.path, doc):
             self._cache = None  # next read must see what is actually on disk
             return

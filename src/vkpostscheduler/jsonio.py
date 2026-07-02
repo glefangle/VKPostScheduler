@@ -26,6 +26,7 @@ def read_json(path: str) -> dict:
 
 
 def write_json(path: str, doc: dict, indent: int | None = None) -> bool:
+    # never write in place; a crash mid-dump would truncate the file
     tmp = path + ".tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
