@@ -1,26 +1,32 @@
 """Job queue and worker thread; posting lives in a PostClient backend."""
 
+import datetime
 import logging
 import os
 import threading
 import time
-from collections.abc import Callable
+from collections import deque
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from queue import Empty, Queue
+from typing import Any, Literal
 
-import paths
-from config import ConfigManager
-from job_store import JobStore
-from posting_client import ClientError, PostClient, PublishTimeInPastError
+from vkpostscheduler import paths
+from vkpostscheduler.config import ConfigManager
+from vkpostscheduler.job_store import Job, JobStore
+from vkpostscheduler.posting_client import ClientError, PostClient, PublishTimeInPastError
+from vkpostscheduler.schedule_time import job_key, parse_publish_time
 
 log = logging.getLogger(__name__)
 
 MAX_RETRIES = 3
-ERROR_WAIT = 60  # the pause gives the error dialog time to be read
+# the pause gives the error dialog time to be read
+ERROR_WAIT = 60
 
 PHOTO_EXTS = (".jpg", ".jpeg", ".png")
 ROTATION_KEY = "photos"
+
+# outcome of _wait_while_paused (the backoff wait only ever yields ok/stopped)
+WaitOutcome = Literal["ok", "resumed", "stopped"]
 
 
 @dataclass
@@ -34,6 +40,8 @@ class PostData:
 
 
 class PostScheduler:
+    """Owns the queue and worker thread; callbacks fire from the worker."""
+
     def __init__(self, config: ConfigManager | None = None,
                  store: JobStore | None = None,
                  client: PostClient | None = None):
