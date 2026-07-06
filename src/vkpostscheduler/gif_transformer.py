@@ -4,6 +4,7 @@ import logging
 import math
 import os
 import tempfile
+from typing import Any
 
 from PIL import Image, ImageSequence
 
@@ -122,7 +123,7 @@ class GIFTransformer:
         canvas.paste(frame, ((tw - w) // 2, (th - h) // 2))
         return canvas
 
-    def info(self, path: str) -> dict:
+    def info(self, path: str) -> dict[str, Any]:
         try:
             with Image.open(path) as img:
                 if img.format != "GIF":

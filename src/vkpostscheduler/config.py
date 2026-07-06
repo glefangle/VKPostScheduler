@@ -1,12 +1,15 @@
 """Token/target configuration; secrets live in the OS credential store."""
 
+import datetime
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
 
 import keyring
 
-import jsonio
+from vkpostscheduler import jsonio
+from vkpostscheduler.schedule_time import format_time, parse_time
 
 log = logging.getLogger(__name__)
 
@@ -57,7 +60,7 @@ class KeyringStore:
 class MemoryStore:
     """In-memory store, used by tests."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.secrets: dict[str, str] = {}
 
     def get(self, name: str) -> str | None:
@@ -76,14 +79,20 @@ class Group:
 
     name: str
     group_id: str
-    day_schedule: list[str] = field(default_factory=list)
+    day_schedule: list[datetime.time] = field(default_factory=list)
     default_text: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not str(self.group_id).strip():
             raise ValueError("Group id must not be empty")
         if self.day_schedule is None:
             self.day_schedule = []
+        else:
+            # coerce json "HH:MM" strings to time once, at load
+            self.day_schedule = [
+                t if isinstance(t, datetime.time) else parse_time(str(t))
+                for t in self.day_schedule
+            ]
 
 
 @dataclass
@@ -91,7 +100,7 @@ class Token:
     name: str
     groups: list[Group] = field(default_factory=list)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         # tolerate groups loaded from the old json format
         if self.groups and isinstance(self.groups[0], dict):
             raw: list[Any] = cast(list[Any], self.groups)
@@ -213,7 +222,7 @@ class ConfigManager:
         self.selected_group = group_name
         self.save()
 
-    def get_selection(self):
+    def get_selection(self) -> tuple[str | None, str | None]:
         return self.selected_token, self.selected_group
 
     def has_valid_selection(self) -> bool:
@@ -236,15 +245,15 @@ class ConfigManager:
 
     # -- per-group schedule and default text -------------------------------
 
-    def get_group_schedule(self, token_name: str, group_name: str) -> list[str]:
+    def get_group_schedule(self, token_name: str,
+                           group_name: str) -> list[datetime.time]:
         token = self.tokens.get(token_name)
         group = token.get_group(group_name) if token else None
         return list(group.day_schedule) if group else []
 
-    def set_group_schedule(self, token_name: str, group_name: str, schedule: list[str]) -> None:
+    def set_group_schedule(self, token_name: str, group_name: str,
+                           schedule: Iterable[datetime.time]) -> None:
         group = self._group_or_raise(token_name, group_name)
-        for t in schedule:
-            self._check_time(t)
         group.day_schedule = list(schedule)
         self.save()
 
@@ -257,25 +266,17 @@ class ConfigManager:
         group.default_text = text
         self.save()
 
-    def _find_group(self, token_name, group_name):
-        token = self.tokens.get(token_name)
-        return token.get_group(group_name) if token else None
+    def _find_group(self, token_name: str | None,
+                    group_name: str | None) -> Group | None:
+        token = self.tokens.get(token_name) if token_name else None
+        return token.get_group(group_name) if token and group_name else None
 
-    def _group_or_raise(self, token_name, group_name):
+    def _group_or_raise(self, token_name: str | None,
+                        group_name: str | None) -> Group:
         group = self._find_group(token_name, group_name)
         if not group:
             raise ValueError(f"Group '{group_name}' not found in token '{token_name}'")
         return group
-
-    @staticmethod
-    def _check_time(t: str) -> None:
-        try:
-            h, m = t.split(":")
-            hour, minute = int(h), int(m)
-        except (ValueError, AttributeError):
-            raise ValueError(f"Bad time '{t}', expected HH:MM") from None
-        if not (0 <= hour <= 23 and 0 <= minute <= 59):
-            raise ValueError(f"Bad time '{t}', expected HH:MM")
 
     # -- persistence ---------------------------------------------------------
 
@@ -314,7 +315,8 @@ class ConfigManager:
             "tokens": {
                 name: {"groups": [
                     {"name": g.name, "group_id": g.group_id,
-                     "day_schedule": g.day_schedule, "default_text": g.default_text}
+                     "day_schedule": [format_time(t) for t in g.day_schedule],
+                     "default_text": g.default_text}
                     for g in tok.groups
                 ]}
                 for name, tok in self.tokens.items()
