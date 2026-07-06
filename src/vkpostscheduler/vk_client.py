@@ -3,17 +3,20 @@
 import logging
 import os
 import re
+from collections.abc import Callable
+from typing import Any
 
 import requests
 import vk_api
 from vk_api.exceptions import ApiError, VkApiError
 
-from gif_transformer import GIFTransformer
-from posting_client import ClientError, PostClient
+from vkpostscheduler.gif_transformer import GIFTransformer
+from vkpostscheduler.posting_client import ClientError, PostClient
 
 log = logging.getLogger(__name__)
 
-UPLOAD_TIMEOUT = (10, 300)  # (connect, read); big gifs read slowly, be generous
+# (connect, read); big gifs read slowly, be generous
+UPLOAD_TIMEOUT = (10, 300)
 
 # retrying never hepls: auth, access, blocked app, invalid params
 PERMANENT_VK_CODES = {5, 7, 8, 15, 100}
@@ -24,11 +27,11 @@ class VKClient(PostClient):
     GIF_MIN_RATIO = 0.66
     GIF_MAX_RATIO = 2.5
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.gif = GIFTransformer(self.GIF_MIN_RATIO, self.GIF_MAX_RATIO, tag="vk")
-        self._sessions: dict[str, object] = {}
+        self._sessions: dict[str, Any] = {}
 
-    def api_for(self, credential: str):
+    def api_for(self, credential: str) -> Any:
         """Authenticated api object per token, cached."""
         if credential not in self._sessions:
             try:
@@ -38,7 +41,7 @@ class VKClient(PostClient):
                 raise self._wrap(e) from e
         return self._sessions[credential]
 
-    def _call(self, method, **params):
+    def _call(self, method: Callable[..., Any], **params: Any) -> Any:
         try:
             return method(**params)
         except ApiError as e:
@@ -51,6 +54,7 @@ class VKClient(PostClient):
         if isinstance(err_data, dict):
             code = err_data.get("error_code")
         if code is None:
+            # not every vk_api version attaches structured error data
             m = re.search(r"\[(\d+)\]", str(error))
             code = int(m.group(1)) if m else None
         return ClientError(str(error), permanent=code in PERMANENT_VK_CODES,
@@ -66,7 +70,7 @@ class VKClient(PostClient):
 
     # -- uploading --------------------------------------------------------
 
-    def upload_photo(self, api, path: str, target_id: str) -> str:
+    def upload_photo(self, api: Any, path: str, target_id: str) -> str:
         group_id = self._group_id(target_id)
         server = self._call(api.photos.getWallUploadServer, group_id=group_id)
         with open(path, "rb") as fh:
@@ -83,7 +87,7 @@ class VKClient(PostClient):
                  os.path.basename(path), saved["owner_id"], saved["id"])
         return f"photo{saved['owner_id']}_{saved['id']}"
 
-    def upload_gif(self, api, path: str, target_id: str,
+    def upload_gif(self, api: Any, path: str, target_id: str,
                    title: str | None = None, transform: bool = True) -> str:
         """GIFs go up as documents."""
         self._group_id(target_id)
@@ -111,7 +115,7 @@ class VKClient(PostClient):
             if temp_created:
                 self.gif.cleanup(actual_path)
 
-    def _maybe_transform(self, path: str):
+    def _maybe_transform(self, path: str) -> tuple[str, bool]:
         """Pad/crop the gif into vk's limits; on failure post the original."""
         try:
             info = self.gif.info(path)
@@ -126,13 +130,13 @@ class VKClient(PostClient):
 
     # -- posting ----------------------------------------------------------
 
-    def post(self, api, target_id: str, message: str | None,
+    def post(self, api: Any, target_id: str, message: str | None,
              attachment: str | None, publish_ts: int | None,
-             post_data: dict | None = None) -> dict:
+             post_data: dict[str, Any] | None = None) -> dict[str, Any]:
         if not message and not attachment:
             raise ValueError("nothing to post: need text or an attachment")
 
-        params: dict = {"owner_id": -self._group_id(target_id)}
+        params: dict[str, Any] = {"owner_id": -self._group_id(target_id)}
         if publish_ts:
             params["publish_date"] = publish_ts
         if message:
