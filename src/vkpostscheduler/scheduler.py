@@ -49,14 +49,11 @@ class PostScheduler:
         self.store = store or JobStore(paths.data_path("jobs_state.json"))
         self.client = client
 
-        self.queue: Queue = Queue()
-        # gui hooks; always called from the worker thread
-        self.on_status: Callable[[str], None] | None = None
-        self.on_progress: Callable[[], None] | None = None
-        self.on_error: Callable[[str, dict], None] | None = None
-
+        self._cond = threading.Condition()
+        self._jobs: deque[Job] = deque()
+        self._paused = False
+        self._stopping = False
         self._worker_thread: threading.Thread | None = None
-        self._stop = threading.Event()
         # bumped on plan replacement; old-plan jobs still queued are dropped
         self._generation = 0
         self._cancelled_post_times: set[str] = set()
@@ -66,10 +63,15 @@ class PostScheduler:
         self._failed = 0
         self._last_status_at = 0.0
 
+        # gui hooks; always called from the worker thread
+        self.on_status: Callable[[str], None] | None = None
+        self.on_progress: Callable[[], None] | None = None
+        self.on_error: Callable[[str, dict[str, Any]], None] | None = None
+
     # -- scheduling -----------------------------------------------------------
 
-    def validate(self, post: PostData, start_date: str, end_date: str,
-                 times: list[str]) -> str | None:
+    def validate(self, post: PostData, start: datetime.date, end: datetime.date,
+                 times: Sequence[datetime.time]) -> str | None:
         """Return a human-readable problem, or None when input is fine."""
         token_name, group_name = self.config.get_selection()
         if not token_name:
@@ -79,11 +81,6 @@ class PostScheduler:
             return f"Token '{token_name}' no longer exists, pick another one."
         if not group_name or not token.get_group(group_name):
             return f"Target '{group_name}' not found in token '{token_name}', pick a target."
-        try:
-            start = datetime.strptime(start_date, "%Y-%m-%d").date()
-            end = datetime.strptime(end_date, "%Y-%m-%d").date()
-        except ValueError:
-            return "Invalid start or end date."
         if start > end:
             return "Start date is after end date."
         if not times:
@@ -92,10 +89,10 @@ class PostScheduler:
             return "Post needs text or at least one image."
         return None
 
-    def schedule(self, post: PostData, start_date: str, end_date: str,
-                 times: list[str]) -> tuple[bool, str | None]:
+    def schedule(self, post: PostData, start: datetime.date, end: datetime.date,
+                 times: Sequence[datetime.time]) -> tuple[bool, str | None]:
         """Queue one job per date/time pair. Replaces any pending plan."""
-        error = self.validate(post, start_date, end_date, times)
+        error = self.validate(post, start, end, times)
         if error:
             return False, error
 
@@ -105,7 +102,10 @@ class PostScheduler:
             self.store.reset_rotation(ROTATION_KEY)
 
         token_name, group_name = self.config.get_selection()
-        jobs, exhausted = self._build_jobs(post, start_date, end_date, times,
+        if not token_name or not group_name:
+            # validate() has ruled this out; narrow so _build_jobs gets str
+            return False, "Select a token and a target first."
+        jobs, exhausted = self._build_jobs(post, start, end, list(times),
                                            token_name, group_name)
         if not jobs:
             return False, "Nothing to schedule."
@@ -113,7 +113,7 @@ class PostScheduler:
         shared = self._shared_post_data(post)
         for job in jobs:
             job["post_data"] = shared
-            self.queue.put(job)
+        self._enqueue(jobs)
         self.store.add_jobs(jobs, post_data=shared)
         self._total = len(jobs)
         self.ensure_worker()
@@ -125,21 +125,20 @@ class PostScheduler:
                          f"the 'different posts' mode.", important=True)
         return True, None
 
-    def _build_jobs(self, post: PostData, start_date: str, end_date: str,
-                    times: list[str], token_name: str, group_name: str):
-        jobs = []
+    def _build_jobs(self, post: PostData, start: datetime.date, end: datetime.date,
+                    times: Sequence[datetime.time], token_name: str,
+                    group_name: str) -> tuple[list[Job], bool]:
+        jobs: list[Job] = []
         exhausted = False
-        photo_idx = None
+        photo_idx: int | None = None
         if post.different_posts and post.photo_paths:
             photo_idx = self.store.get_rotation(ROTATION_KEY) + 1
 
-        start = datetime.strptime(start_date, "%Y-%m-%d").date()
-        end = datetime.strptime(end_date, "%Y-%m-%d").date()
         day = start
         while day <= end and not exhausted:
             for t in times:
-                job = {
-                    "post_time": f"{day:%Y-%m-%d} {t}",
+                job: Job = {
+                    "post_time": job_key(day, t),
                     "attempt": 0,
                     "token_name": token_name,
                     "group_name": group_name,
@@ -153,14 +152,14 @@ class PostScheduler:
                     job["photo_index"] = photo_idx
                     photo_idx += 1
                 jobs.append(job)
-            day += timedelta(days=1)
+            day += datetime.timedelta(days=1)
 
         if photo_idx is not None:
             self.store.set_rotation(ROTATION_KEY, photo_idx - 1)
         return jobs, exhausted
 
     @staticmethod
-    def _shared_post_data(post: PostData) -> dict:
+    def _shared_post_data(post: PostData) -> dict[str, Any]:
         """The plan's content as one shaared copy, stored once."""
         return {
             "text": post.text,
@@ -170,15 +169,12 @@ class PostScheduler:
             "gif_transform": post.gif_transform,
         }
 
-    def _throw_out_plan(self):
-        self._generation += 1
-        self._cancelled_post_times.clear()
+    def _throw_out_plan(self) -> None:
+        with self._cond:
+            self._generation += 1
+            self._cancelled_post_times.clear()
+            self._jobs.clear()
         self.store.clear_jobs()
-        while True:
-            try:
-                self.queue.get_nowait()
-            except Empty:
-                break
         self._total = 0
         self._ok = 0
         self._failed = 0
@@ -191,7 +187,7 @@ class PostScheduler:
         for job in jobs:
             job.setdefault("attempt", 0)
             job.setdefault("generation", self._generation)
-            self.queue.put(job)
+        self._enqueue(jobs)
         if jobs:
             self._total = len(jobs)
         return len(jobs)
@@ -206,78 +202,82 @@ class PostScheduler:
             self._progress()
         return removed
 
-    def clear_all(self):
+    def clear_all(self) -> None:
         self._throw_out_plan()
         self._status("All pending jobs cleared.", important=True)
         self._progress()
 
-    def pause(self):
-        self._pause.set()
+    def pause(self) -> None:
+        self._set_paused(True)
         self._status("Queue paused.", important=True)
         self._progress()
 
-    def resume(self):
-        self._pause.clear()
+    def resume(self) -> None:
+        self._set_paused(False)
         self.ensure_worker()
         self._status("Queue resumed.", important=True)
         self._progress()
 
     def is_paused(self) -> bool:
-        return self._pause.is_set()
+        with self._cond:
+            return self._paused
 
-    def stop(self, preserve_jobs: bool = True):
+    def stop(self, preserve_jobs: bool = True) -> None:
         """Stop the worker; pending jobs stay on disk unless preserve_jobs=False."""
+        with self._cond:
+            self._stopping = True
+            self._paused = False
+            if not preserve_jobs:
+                self._throw_out_plan()
+            self._cond.notify_all()
+
         thread = self._worker_thread
-        running = thread is not None and thread.is_alive()
-        self._stop.set()
-        self._pause.clear()
-
-        if not preserve_jobs:
-            self._throw_out_plan()
-
-        if running and thread is not None:
+        if thread is not None and thread.is_alive():
             thread.join(timeout=5)
             if thread.is_alive():
                 log.warning("worker thread did not stop within 5s")
         self._progress()
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         self.stop(preserve_jobs=True)
 
-    def ensure_worker(self):
+    def ensure_worker(self) -> None:
         """Start the worker thread unless one is still running."""
-        if self._worker_thread and self._worker_thread.is_alive():
-            if self._stop.is_set():
-                self._worker_thread.join(timeout=10)
-            if self._worker_thread.is_alive():
+        thread = self._worker_thread
+        if thread is not None and thread.is_alive():
+            if not self._stopping:
                 return
-        self._stop.clear()
-        self._worker_thread = threading.Thread(
-            target=self._worker, name="poster", daemon=True)
-        self._worker_thread.start()
+            thread.join(timeout=10)
+            if thread.is_alive():
+                return
+        with self._cond:
+            self._stopping = False
+            self._worker_thread = threading.Thread(
+                target=self._worker, name="poster", daemon=True)
+            self._worker_thread.start()
 
-    def current_jobs(self) -> list[dict]:
+    def current_jobs(self) -> list[dict[str, Any]]:
         """Pending jobs with display info for the status tab."""
-        result = []
+        result: list[dict[str, Any]] = []
         for job in self.store.load_jobs():
-            info = {
+            info: dict[str, Any] = {
                 "post_time": job.get("post_time", "?"),
                 "attempt": job.get("attempt", 0),
                 "status": "pending",
             }
-            paths = self._plan_photo_paths(job.get("post_data", {}))
-            if "photo_index" in job and 0 <= job["photo_index"] < len(paths):
-                info["photo"] = os.path.basename(paths[job["photo_index"]])
+            plan_paths = self._plan_photo_paths(job.get("post_data", {}))
+            if "photo_index" in job and 0 <= job["photo_index"] < len(plan_paths):
+                info["photo"] = os.path.basename(plan_paths[job["photo_index"]])
                 info["photo_no"] = job["photo_index"] + 1
-                info["photo_total"] = len(paths)
-            elif paths:
-                info["photo"] = os.path.basename(paths[0])
+                info["photo_total"] = len(plan_paths)
+            elif plan_paths:
+                info["photo"] = os.path.basename(plan_paths[0])
                 info["photo_no"] = 1
                 info["photo_total"] = 1
             result.append(info)
         return result
 
-    def stats(self) -> dict:
+    def stats(self) -> dict[str, int]:
         pending = self.store.pending_count()
         done = self._ok + self._failed
         return {
