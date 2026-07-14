@@ -290,17 +290,12 @@ class PostScheduler:
 
     # -- worker -----------------------------------------------------------------
 
-    def _worker(self):
+    def _worker(self) -> None:
         log.info("worker started")
-        while not self._stop.is_set():
-            if self._pause.is_set():
-                self._pause.wait(0.5)
-                continue
-            try:
-                job = self.queue.get(timeout=0.5)
-            except Empty:
-                continue
-
+        while True:
+            job = self._next_job()
+            if job is None:
+                break
             if self._is_stale(job):
                 continue
 
@@ -312,11 +307,32 @@ class PostScheduler:
             else:
                 self._finish_success(job)
 
-            if not self._stop.is_set() and not self._pause.is_set():
-                time.sleep(max(0, job.get("sleep_time", 1)))
+            self._sleep_between_posts(max(0, job.get("sleep_time", 1)))
         log.info("worker stopped")
 
-    def _is_stale(self, job: dict) -> bool:
+    def _work_ready(self) -> bool:
+        """Condition predicate: a job can be taken right now."""
+        return self._stopping or bool(self._jobs) and not self._paused
+
+    def _next_job(self) -> Job | None:
+        """Block until a job is due; None after stop."""
+        with self._cond:
+            self._cond.wait_for(self._work_ready)
+            if self._stopping or not self._jobs:
+                return None
+            return self._jobs.popleft()
+
+    def _enqueue(self, jobs: Iterable[Job]) -> None:
+        with self._cond:
+            self._jobs.extend(jobs)
+            self._cond.notify_all()
+
+    def _set_paused(self, paused: bool) -> None:
+        with self._cond:
+            self._paused = paused
+            self._cond.notify_all()
+
+    def _is_stale(self, job: Job) -> bool:
         if job.get("generation", self._generation) != self._generation:
             log.debug("dropping stale job %s", job.get("post_time"))
             return True
@@ -327,7 +343,7 @@ class PostScheduler:
             return True
         return False
 
-    def _execute(self, job: dict):
+    def _execute(self, job: Job) -> None:
         post_time = job["post_time"]
         post_data = job.get("post_data", {})
         self._status(f"Processing {post_time}")
@@ -357,28 +373,29 @@ class PostScheduler:
 
     @staticmethod
     def _publish_ts(post_time: str) -> int:
-        dt = datetime.strptime(post_time, "%Y-%m-%d %H:%M")
-        if dt <= datetime.now():
+        dt = parse_publish_time(post_time)
+        if dt <= datetime.datetime.now():
             raise PublishTimeInPastError(
                 f"publish time {post_time} has already passed")
         return int(dt.timestamp())
 
     @staticmethod
-    def _plan_photo_paths(post_data: dict) -> list[str]:
+    def _plan_photo_paths(post_data: dict[str, Any]) -> list[str]:
         """The plan's images; pre-1.2 plans kept a single photo_path."""
-        paths = post_data.get("photo_paths") or []
-        if not paths and post_data.get("photo_path"):
-            paths = [post_data["photo_path"]]
-        return paths
+        plan_paths = post_data.get("photo_paths") or []
+        if not plan_paths and post_data.get("photo_path"):
+            plan_paths = [post_data["photo_path"]]
+        return plan_paths
 
     @classmethod
-    def _media_for(cls, job: dict, post_data: dict) -> str | None:
-        paths = cls._plan_photo_paths(post_data)
-        if "photo_index" in job and 0 <= job["photo_index"] < len(paths):
-            return paths[job["photo_index"]]
-        return paths[0] if paths else None
+    def _media_for(cls, job: Job, post_data: dict[str, Any]) -> str | None:
+        plan_paths = cls._plan_photo_paths(post_data)
+        if "photo_index" in job and 0 <= job["photo_index"] < len(plan_paths):
+            return plan_paths[job["photo_index"]]
+        return plan_paths[0] if plan_paths else None
 
-    def _upload_media(self, api, path: str, target_id: str, post_data: dict) -> str:
+    def _upload_media(self, api: Any, path: str, target_id: str,
+                      post_data: dict[str, Any]) -> str:
         client = self.client
         if client is None:
             raise RuntimeError("no posting client configured")
@@ -394,13 +411,14 @@ class PostScheduler:
                 transform=post_data.get("gif_transform", True))
         raise ValueError(f"{path}: unsupported file type {ext}")
 
-    def _finish_success(self, job: dict):
+    def _finish_success(self, job: Job) -> None:
         self.store.remove_by_post_time(job["post_time"])
         self._ok += 1
         self._status(f"Posted {job['post_time']} to {job.get('group_name', '?')}")
         self._progress()
 
-    def _handle_failure(self, job: dict, error: Exception) -> str:
+    def _handle_failure(self, job: Job,
+                        error: Exception) -> Literal["ok", "stopped"]:
         """Park a failed job for retry, or fail it for good."""
         post_time = job["post_time"]
         attempt = job.get("attempt", 0)
@@ -420,7 +438,7 @@ class PostScheduler:
             return "ok"
 
         # pause and tell the user; resuming skips the wait
-        self._pause.set()
+        self._set_paused(True)
         self._status(f"Error on {post_time}: {error}", important=True)
         self._notify_error(f"Posting error for {post_time}", details)
 
@@ -434,14 +452,15 @@ class PostScheduler:
                          f"(retry {attempt + 1}/{MAX_RETRIES})", important=True)
             if self._wait_out_backoff(backoff) == "stopped":
                 return "stopped"
+            # TODO: attempt count is queue-only, a restart resets the retry budget
             job["attempt"] = attempt + 1
-            self.queue.put(job)
+            self._enqueue([job])
         else:
             self._fail_job(job, f"{post_time} failed after "
                                 f"{MAX_RETRIES} retries: {error}")
         return "ok"
 
-    def _fail_job(self, job: dict, message: str):
+    def _fail_job(self, job: Job, message: str) -> None:
         self.store.remove_by_post_time(job["post_time"])
         self._failed += 1
         self._status(message, important=True)
@@ -459,35 +478,47 @@ class PostScheduler:
             return error.permanent
         return False
 
-    def _wait_while_paused(self, seconds: int) -> str:
-        """Hold while paused, at most seconds; the error dialog's grace period."""
-        for _ in range(int(seconds)):
-            if self._stop.is_set():
-                return "stopped"
-            if not self._pause.is_set():
-                return "resumed"
-            time.sleep(1)
-        return "ok"
+    # -- interruptible waits (all condition-based, no polling) --------------------
 
-    def _wait_out_backoff(self, seconds: int) -> str:
-        """Count down the retry backoff; pause freezes it, stop ends it."""
-        left = int(seconds)
-        while left > 0:
-            if self._stop.is_set():
+    def _wait_while_paused(self, seconds: float) -> WaitOutcome:
+        """Hold while paused, at most seconds; the error dialog's grace period."""
+        with self._cond:
+            woken = self._cond.wait_for(
+                lambda: self._stopping or not self._paused, timeout=seconds)
+            if self._stopping:
                 return "stopped"
-            if self._pause.is_set():
-                self._pause.wait(0.5)
-                continue
-            time.sleep(1)
-            left -= 1
-        return "ok"
+            return "resumed" if woken else "ok"
+
+    def _wait_out_backoff(self, seconds: float) -> Literal["ok", "stopped"]:
+        """Count down the retry backoff; pause freezes it, stop ends it."""
+        remaining = float(seconds)
+        with self._cond:
+            while remaining > 0 and not self._stopping:
+                if self._paused:
+                    self._cond.wait_for(
+                        lambda: self._stopping or not self._paused)
+                    continue
+                started = time.monotonic()
+                self._cond.wait_for(
+                    lambda: self._stopping or self._paused, timeout=remaining)
+                remaining -= time.monotonic() - started
+            return "stopped" if self._stopping else "ok"
+
+    def _sleep_between_posts(self, seconds: float) -> None:
+        """Interruptible gap between posts; stop or pause ends it."""
+        if seconds <= 0:
+            return
+        with self._cond:
+            self._cond.wait_for(
+                lambda: self._stopping or self._paused, timeout=seconds)
 
     # -- gui hooks ----------------------------------------------------------------
 
-    def _status(self, message: str, important: bool = False):
+    def _status(self, message: str, important: bool = False) -> None:
         if not self.on_status:
             return
         if not important:
+            # otherwise every "Processing ..." floods the log
             now = time.monotonic()
             if now - self._last_status_at < 0.1:
                 return
@@ -497,7 +528,7 @@ class PostScheduler:
         except Exception:
             log.exception("status callback failed")
 
-    def _progress(self):
+    def _progress(self) -> None:
         if not self.on_progress:
             return
         try:
@@ -505,7 +536,7 @@ class PostScheduler:
         except Exception:
             log.exception("progress callback failed")
 
-    def _notify_error(self, message: str, details: dict):
+    def _notify_error(self, message: str, details: dict[str, Any]) -> None:
         if not self.on_error:
             return
         try:
