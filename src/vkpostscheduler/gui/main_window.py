@@ -45,47 +45,7 @@ APP_TITLE = "VK Post Scheduler"
 APP_VERSION = "1.2.0"
 GIF_TRANSFORM_LABEL = "Transform GIFs to VK limits (0.66:1 - 2.5:1)"
 
-BUTTON = """
-QPushButton {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #4a90e2, stop:1 #357abd);
-    border: none; border-radius: 5px; color: white;
-    padding: 8px 16px; font-weight: 500;
-}
-QPushButton:hover { background: #5ba0f2; }
-QPushButton:pressed { background: #357abd; }
-QPushButton:disabled { background: #cccccc; color: #666666; }
-"""
-
-BUTTON_DANGER = """
-QPushButton {
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 #dc3545, stop:1 #c82333);
-    border: none; border-radius: 5px; color: white;
-    padding: 8px 16px; font-weight: 500;
-}
-QPushButton:hover { background: #e74c3c; }
-"""
-
-BUTTON_QUIET = """
-QPushButton {
-    background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px;
-    color: #495057; padding: 6px 12px;
-}
-QPushButton:hover { background: #e9ecef; }
-QPushButton:pressed { background: #dee2e6; }
-"""
-
-INPUT = """
-QLineEdit, QComboBox, QTimeEdit, QDateEdit, QSpinBox {
-    border: 2px solid #e9ecef; border-radius: 5px; padding: 6px 10px;
-    background: white; color: #495057;
-}
-QLineEdit:focus, QComboBox:focus, QTimeEdit:focus, QDateEdit:focus, QSpinBox:focus {
-    border-color: #4a90e2;
-}
-"""
-
+from vkpostscheduler.gui.styles import BUTTON, BUTTON_DANGER, BUTTON_QUIET, INPUT, apply_app_style
 
 class TokenDialog(QDialog):
     def __init__(self, parent, config, token_name=None):
