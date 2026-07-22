@@ -35,3 +35,50 @@ def inform(parent: QWidget | None, title: str, text: str) -> None:
 
 def warn(parent: QWidget | None, title: str, text: str) -> None:
     QMessageBox.warning(parent, title, text)
+
+
+class TokenDialog(QDialog):
+    def __init__(self, parent: QWidget | None, config: ConfigManager,
+                 token_name: str | None = None) -> None:
+        super().__init__(parent)
+        self.config = config
+        self.token_name = token_name
+        self.setWindowTitle("Edit token" if token_name else "Add token")
+        self.setFixedWidth(440)
+
+        self.name_edit = QLineEdit()
+        self.value_edit = QLineEdit()
+        self.value_edit.setEchoMode(QLineEdit.Password)
+        if token_name:
+            self.name_edit.setText(token_name)
+            self.value_edit.setText(config.token_value(token_name) or "")
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+
+        form = QFormLayout()
+        form.addRow("Name:", self.name_edit)
+        form.addRow("VK token:", self.value_edit)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def _save(self) -> None:
+        name = self.name_edit.text().strip()
+        value = self.value_edit.text().strip()
+        if not name or not value:
+            warn(self, "Check input", "Name and token are both required.")
+            return
+        try:
+            if self.token_name:
+                self.config.update_token(self.token_name, name, value)
+            else:
+                self.config.add_token(name, value)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+            return
+        self.accept()
+
+
