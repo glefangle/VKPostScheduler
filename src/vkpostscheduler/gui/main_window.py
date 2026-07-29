@@ -46,58 +46,8 @@ APP_VERSION = "1.2.0"
 GIF_TRANSFORM_LABEL = "Transform GIFs to VK limits (0.66:1 - 2.5:1)"
 
 from vkpostscheduler.gui.styles import BUTTON, BUTTON_DANGER, BUTTON_QUIET, INPUT, apply_app_style
+from vkpostscheduler.gui.dialogs import GroupDialog
 from vkpostscheduler.gui.dialogs import TokenDialog
-
-class GroupDialog(QDialog):
-    def __init__(self, parent, token, group_name=None):
-        super().__init__(parent)
-        self.token = token
-        self.group_name = group_name
-        self.setWindowTitle("Edit group" if group_name else "Add group")
-        self.setFixedWidth(440)
-
-        self.name_edit = QLineEdit()
-        self.id_edit = QLineEdit()
-        if group_name:
-            group = token.get_group(group_name)
-            if group:
-                self.name_edit.setText(group.name)
-                self.id_edit.setText(group.group_id)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        buttons.accepted.connect(self._save)
-        buttons.rejected.connect(self.reject)
-
-        form = QFormLayout()
-        form.addRow("Name:", self.name_edit)
-        form.addRow("Group ID:", self.id_edit)
-
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(buttons)
-
-    def _save(self):
-        name = self.name_edit.text().strip()
-        gid = self.id_edit.text().strip()
-        if not name or not gid:
-            QMessageBox.warning(self, "Check input", "Name and group ID are both required.")
-            return
-        # group ids are numbers, possibly negative
-        try:
-            int(gid.lstrip("-"))
-        except ValueError:
-            QMessageBox.warning(self, "Check input", "Group ID must be a number.")
-            return
-        try:
-            if self.group_name:
-                self.token.update_group(self.group_name, Group(name, gid))
-            else:
-                self.token.add_group(Group(name, gid))
-        except Exception as e:
-            QMessageBox.critical(self, "Error", str(e))
-            return
-        self.accept()
-
 
 class ErrorDialog(QDialog):
     """Shown when a post fails; the queue stays paused."""
