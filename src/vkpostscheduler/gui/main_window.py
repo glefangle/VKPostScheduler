@@ -46,68 +46,9 @@ APP_VERSION = "1.2.0"
 GIF_TRANSFORM_LABEL = "Transform GIFs to VK limits (0.66:1 - 2.5:1)"
 
 from vkpostscheduler.gui.styles import BUTTON, BUTTON_DANGER, BUTTON_QUIET, INPUT, apply_app_style
+from vkpostscheduler.gui.dialogs import ErrorDialog
 from vkpostscheduler.gui.dialogs import GroupDialog
 from vkpostscheduler.gui.dialogs import TokenDialog
-
-class ErrorDialog(QDialog):
-    """Shown when a post fails; the queue stays paused."""
-
-    def __init__(self, parent, message: str, details: dict):
-        super().__init__(parent)
-        self.details = details
-        self.setWindowTitle("Posting error")
-        self.setMinimumSize(560, 380)
-
-        header = QLabel(message)
-        header.setWordWrap(True)
-        header.setStyleSheet("font-size: 15px; font-weight: bold; color: #d32f2f;")
-
-        body = QTextEdit()
-        body.setReadOnly(True)
-        body.setFont(QFont("Consolas", 9))
-        body.setPlainText(self._format(details))
-
-        copy_btn = QPushButton("Copy details")
-        copy_btn.setStyleSheet(BUTTON_QUIET)
-        copy_btn.clicked.connect(self._copy)
-
-        resume_btn = QPushButton("Resume queue")
-        resume_btn.setDefault(True)
-        resume_btn.setStyleSheet(BUTTON)
-        resume_btn.clicked.connect(self.accept)
-
-        keep_btn = QPushButton("Keep paused")
-        keep_btn.setStyleSheet(BUTTON_DANGER)
-        keep_btn.clicked.connect(self.reject)
-
-        buttons = QHBoxLayout()
-        buttons.addWidget(copy_btn)
-        buttons.addStretch()
-        buttons.addWidget(keep_btn)
-        buttons.addWidget(resume_btn)
-
-        layout = QVBoxLayout(self)
-        layout.addWidget(header)
-        layout.addWidget(body, 1)
-        layout.addLayout(buttons)
-
-    @staticmethod
-    def _format(d: dict) -> str:
-        lines = [
-            f"Job:      {d.get('post_time', '?')}",
-            f"Group:    {d.get('group', '?')}",
-            f"Attempt:  {d.get('attempt', 0) + 1}",
-            f"Error:    {d.get('error', '?')}",
-            "",
-            f"Time: {datetime.now():%Y-%m-%d %H:%M:%S}",
-        ]
-        return "\n".join(lines)
-
-    def _copy(self):
-        clipboard = QApplication.clipboard()
-        if clipboard is not None:
-            clipboard.setText(self._format(self.details))
-
 
 class MainWindow(QMainWindow):
     # signals marshal worker callbacks onto the gui thread
