@@ -1,21 +1,19 @@
-"""PyQt interface for the scheduler."""
+"""The main window: three tabs (post content, schedule, status)."""
 
+import datetime
 import html
 import logging
 import os
-from datetime import datetime
+from datetime import time
+from typing import Any, cast
 
-from PyQt5.QtCore import QDate, Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from PyQt5.QtCore import QDate, QPoint, Qt, pyqtSignal
+from PyQt5.QtGui import QCloseEvent, QFont
 from PyQt5.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QDateEdit,
-    QDialog,
-    QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -36,19 +34,21 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from config import Group
-from scheduler import PostData, PostScheduler
+from vkpostscheduler import APP_TITLE, __version__
+from vkpostscheduler.config import ConfigManager, Token
+from vkpostscheduler.gui import dialogs
+from vkpostscheduler.gui.dialogs import ErrorDialog, GroupDialog, TokenDialog
+from vkpostscheduler.gui.styles import BUTTON, BUTTON_DANGER, BUTTON_QUIET, apply_app_style
+from vkpostscheduler.schedule_time import format_time, parse_time
+from vkpostscheduler.scheduler import PostData, PostScheduler
 
 log = logging.getLogger(__name__)
 
-APP_TITLE = "VK Post Scheduler"
-APP_VERSION = "1.2.0"
+APP_VERSION = __version__
 GIF_TRANSFORM_LABEL = "Transform GIFs to VK limits (0.66:1 - 2.5:1)"
 
-from vkpostscheduler.gui.styles import BUTTON, BUTTON_DANGER, BUTTON_QUIET, INPUT, apply_app_style
-from vkpostscheduler.gui.dialogs import ErrorDialog
-from vkpostscheduler.gui.dialogs import GroupDialog
-from vkpostscheduler.gui.dialogs import TokenDialog
+MAX_SHOWN_PHOTOS = 3
+
 
 class MainWindow(QMainWindow):
     # signals marshal worker callbacks onto the gui thread
@@ -56,12 +56,45 @@ class MainWindow(QMainWindow):
     progress_sig = pyqtSignal()
     error_sig = pyqtSignal(str, dict)
 
+    # -- widgets built in the _build_* methods --------------------------------
+    tabs: QTabWidget
+    status_tab: QWidget
+    token_combo: QComboBox
+    group_combo: QComboBox
+    token_add_btn: QPushButton
+    token_edit_btn: QPushButton
+    token_delete_btn: QPushButton
+    group_add_btn: QPushButton
+    group_edit_btn: QPushButton
+    group_delete_btn: QPushButton
+    photos_label: QLabel
+    browse_btn: QPushButton
+    different_check: QCheckBox
+    gif_name_edit: QLineEdit
+    gif_transform_check: QCheckBox
+    text_edit: QTextEdit
+    start_date: QDateEdit
+    end_date: QDateEdit
+    time_edit: QTimeEdit
+    add_time_btn: QPushButton
+    remove_time_btn: QPushButton
+    times_list: QListWidget
+    sleep_spin: QSpinBox
+    schedule_btn: QPushButton
+    stop_btn: QPushButton
+    progress: QProgressBar
+    counters: QLabel
+    pause_btn: QPushButton
+    clear_btn: QPushButton
+    jobs_list: QListWidget
+    log_view: QTextEdit
+
     def __init__(self, scheduler: PostScheduler):
         super().__init__()
         self.scheduler = scheduler
 
         self.photo_paths: list[str] = []
-        self.times: list[str] = []
+        self.times: list[time] = []
 
         scheduler.on_status = self.status_sig.emit
         scheduler.on_progress = self.progress_sig.emit
@@ -72,7 +105,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(1000, 680)
-        self._apply_style()
+        apply_app_style()
         self._build_ui()
         self._connect()
 
@@ -86,45 +119,7 @@ class MainWindow(QMainWindow):
 
     # -- setup ---------------------------------------------------------------
 
-    @staticmethod
-    def _apply_style():
-        qss = """
-        QMainWindow { background: #f8f9fa; }
-        QGroupBox {
-            font-weight: bold; border: 2px solid #dee2e6; border-radius: 8px;
-            margin-top: 10px; padding-top: 10px;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin; left: 10px; padding: 0 5px; color: #495057;
-        }
-        QLabel { color: #495057; }
-        QTabWidget::pane { border: 2px solid #dee2e6; border-radius: 8px; background: white; }
-        QTabBar::tab {
-            background: #e9ecef; border: 1px solid #dee2e6; padding: 8px 16px;
-            margin-right: 2px; border-top-left-radius: 5px; border-top-right-radius: 5px;
-        }
-        QTabBar::tab:selected { background: white; border-bottom-color: white; }
-        QListWidget {
-            border: 2px solid #e9ecef; border-radius: 5px; background: white;
-            color: #495057; outline: none;
-        }
-        QListWidget::item { padding: 6px; border-bottom: 1px solid #f8f9fa; }
-        QListWidget::item:selected { background: #4a90e2; color: white; }
-        QProgressBar {
-            border: 2px solid #e9ecef; border-radius: 10px; text-align: center;
-            background: #f8f9fa; color: #495057; font-weight: bold;
-        }
-        QProgressBar::chunk {
-            border-radius: 8px;
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 #4a90e2, stop:1 #357abd);
-        }
-        """ + INPUT
-        app = QApplication.instance()
-        if isinstance(app, QApplication):
-            app.setStyleSheet(qss)
-
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         central = QWidget()
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
@@ -141,7 +136,7 @@ class MainWindow(QMainWindow):
         footer.setStyleSheet("color: #6c757d; font-size: 11px;")
         root.addWidget(footer, 0, Qt.AlignmentFlag.AlignRight)
 
-    def _post_tab(self):
+    def _post_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
@@ -152,21 +147,15 @@ class MainWindow(QMainWindow):
         self.token_combo = QComboBox()
         self.token_combo.setMinimumWidth(220)
         grid.addWidget(self.token_combo, 0, 1)
-        for i, label in enumerate(("Add", "Edit", "Delete")):
-            btn = QPushButton(label)
-            btn.setStyleSheet(BUTTON_QUIET)
-            btn.setObjectName(f"token_{label.lower()}")
-            grid.addWidget(btn, 0, 2 + i)
+        (self.token_add_btn, self.token_edit_btn,
+         self.token_delete_btn) = self._crud_buttons(grid, row=0)
 
         grid.addWidget(QLabel("Group:"), 1, 0)
         self.group_combo = QComboBox()
         self.group_combo.setMinimumWidth(220)
         grid.addWidget(self.group_combo, 1, 1)
-        for i, label in enumerate(("Add", "Edit", "Delete")):
-            btn = QPushButton(label)
-            btn.setStyleSheet(BUTTON_QUIET)
-            btn.setObjectName(f"group_{label.lower()}")
-            grid.addWidget(btn, 1, 2 + i)
+        (self.group_add_btn, self.group_edit_btn,
+         self.group_delete_btn) = self._crud_buttons(grid, row=1)
 
         layout.addWidget(accounts)
 
@@ -207,7 +196,18 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         return tab
 
-    def _schedule_tab(self):
+    @staticmethod
+    def _crud_buttons(grid: QGridLayout, row: int) -> tuple[QPushButton, ...]:
+        """The Add/Edit/Delete triple in one account grid row."""
+        buttons: list[QPushButton] = []
+        for col, label in enumerate(("Add", "Edit", "Delete"), start=2):
+            btn = QPushButton(label)
+            btn.setStyleSheet(BUTTON_QUIET)
+            grid.addWidget(btn, row, col)
+            buttons.append(btn)
+        return tuple(buttons)
+
+    def _schedule_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
