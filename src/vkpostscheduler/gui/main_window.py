@@ -266,7 +266,7 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         return tab
 
-    def _status_tab(self):
+    def _status_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
@@ -307,28 +307,30 @@ class MainWindow(QMainWindow):
         layout.addWidget(log_box)
         return tab
 
-    def _connect(self):
-        self.tabs.currentChanged.connect(lambda _: self._refresh_progress())
+    def _connect(self) -> None:
+        self.tabs.currentChanged.connect(lambda _index: self._refresh_progress())
 
         self.token_combo.currentTextChanged.connect(self._on_token_changed)
         self.group_combo.currentTextChanged.connect(self._on_group_changed)
-        for name in ("token_add", "token_edit", "token_delete",
-                     "group_add", "group_edit", "group_delete"):
-            btn = self.findChild(QPushButton, name)
-            btn.clicked.connect(getattr(self, "_" + name))
+        self.token_add_btn.clicked.connect(self._token_add)
+        self.token_edit_btn.clicked.connect(self._token_edit)
+        self.token_delete_btn.clicked.connect(self._token_delete)
+        self.group_add_btn.clicked.connect(self._group_add)
+        self.group_edit_btn.clicked.connect(self._group_edit)
+        self.group_delete_btn.clicked.connect(self._group_delete)
 
         self.browse_btn.clicked.connect(self._browse_photos)
         self.add_time_btn.clicked.connect(self._add_time)
         self.remove_time_btn.clicked.connect(self._remove_time)
         self.times_list.customContextMenuRequested.connect(self._times_menu)
         self.schedule_btn.clicked.connect(self._schedule)
-        self.stop_btn.clicked.connect(lambda: self.scheduler.stop(preserve_jobs=True))
+        self.stop_btn.clicked.connect(self._stop_worker)
         self.clear_btn.clicked.connect(self._clear_jobs)
         self.jobs_list.customContextMenuRequested.connect(self._jobs_menu)
 
     # -- accounts -----------------------------------------------------------------
 
-    def _refresh_selection(self):
+    def _refresh_selection(self) -> None:
         config = self.scheduler.config
         names = config.token_names()
         current_token, current_group = config.get_selection()
@@ -358,7 +360,7 @@ class MainWindow(QMainWindow):
                                                 self.group_combo.currentText())
             self._load_group_data()
 
-    def _on_token_changed(self, token_name: str):
+    def _on_token_changed(self, token_name: str) -> None:
         if not token_name:
             return
         try:
@@ -374,7 +376,7 @@ class MainWindow(QMainWindow):
         self.times.clear()
         self.times_list.clear()
 
-    def _on_group_changed(self, group_name: str):
+    def _on_group_changed(self, group_name: str) -> None:
         token_name = self.token_combo.currentText()
         if not token_name or not group_name:
             return
@@ -392,7 +394,7 @@ class MainWindow(QMainWindow):
         config.set_selection(token_name, group_name)
         self._load_group_data()
 
-    def _load_group_data(self):
+    def _load_group_data(self) -> None:
         token_name = self.token_combo.currentText()
         group_name = self.group_combo.currentText()
         if not token_name or not group_name:
@@ -400,78 +402,80 @@ class MainWindow(QMainWindow):
         config = self.scheduler.config
         self.times = list(config.get_group_schedule(token_name, group_name))
         self.times_list.clear()
-        self.times_list.addItems(self.times)
+        self.times_list.addItems([format_time(t) for t in self.times])
         self.text_edit.setPlainText(config.get_group_default_text(token_name, group_name))
 
-    def _token_add(self):
-        dialog = TokenDialog(self, self.scheduler.config)
+    def _token_add(self) -> None:
+        dialog = TokenDialog(self, self._config())
         if dialog.exec_():
             self._refresh_selection()
             self._log("Token added.")
 
-    def _token_edit(self):
+    def _token_edit(self) -> None:
         name = self.token_combo.currentText()
         if not name:
-            QMessageBox.warning(self, "No token", "Select a token to edit.")
+            dialogs.warn(self, "No token", "Select a token to edit.")
             return
-        dialog = TokenDialog(self, self.scheduler.config, name)
+        dialog = TokenDialog(self, self._config(), name)
         if dialog.exec_():
             self._refresh_selection()
             self._log("Token updated.")
 
-    def _token_delete(self):
+    def _token_delete(self) -> None:
         name = self.token_combo.currentText()
         if not name:
-            QMessageBox.warning(self, "No token", "Select a token to delete.")
+            dialogs.warn(self, "No token", "Select a token to delete.")
             return
-        if QMessageBox.question(self, "Confirm",
-                                f"Delete token '{name}' with all its groups?") != QMessageBox.Yes:
+        if not dialogs.ask(self, "Confirm",
+                           f"Delete token '{name}' with all its groups?"):
             return
         self.scheduler.config.remove_token(name)
         self._refresh_selection()
         self._log("Token deleted.")
 
-    def _group_add(self):
-        token_name = self.token_combo.currentText()
-        token = self.scheduler.config.get_token(token_name) if token_name else None
-        if not token:
-            QMessageBox.warning(self, "No token", "Select a token first.")
+    def _group_add(self) -> None:
+        token = self._current_token()
+        if token is None:
+            dialogs.warn(self, "No token", "Select a token first.")
             return
         dialog = GroupDialog(self, token)
         if dialog.exec_():
             self._refresh_selection()
             self._log("Group added.")
 
-    def _group_edit(self):
-        token_name = self.token_combo.currentText()
+    def _group_edit(self) -> None:
+        token = self._current_token()
         group_name = self.group_combo.currentText()
-        token = self.scheduler.config.get_token(token_name) if token_name else None
-        if not token or not group_name:
-            QMessageBox.warning(self, "No group", "Select a group to edit.")
+        if token is None or not group_name:
+            dialogs.warn(self, "No group", "Select a group to edit.")
             return
         dialog = GroupDialog(self, token, group_name)
         if dialog.exec_():
             self._refresh_selection()
             self._log("Group updated.")
 
-    def _group_delete(self):
-        token_name = self.token_combo.currentText()
+    def _group_delete(self) -> None:
+        token = self._current_token()
         group_name = self.group_combo.currentText()
-        token = self.scheduler.config.get_token(token_name) if token_name else None
-        if not token or not group_name:
-            QMessageBox.warning(self, "No group", "Select a group to delete.")
+        if token is None or not group_name:
+            dialogs.warn(self, "No group", "Select a group to delete.")
             return
-        if QMessageBox.question(self, "Confirm",
-                                f"Delete group '{group_name}'?") != QMessageBox.Yes:
+        if not dialogs.ask(self, "Confirm", f"Delete group '{group_name}'?"):
             return
         token.remove_group(group_name)
         self.scheduler.config.save()
         self._refresh_selection()
         self._log("Group deleted.")
 
+    def _current_token(self) -> Token | None:
+        return self._config().get_token(self.token_combo.currentText()) or None
+
+    def _config(self) -> ConfigManager:
+        return self.scheduler.config
+
     # -- post content ---------------------------------------------------------
 
-    def _browse_photos(self):
+    def _browse_photos(self) -> None:
         paths, _ = QFileDialog.getOpenFileNames(
             self, "Select images", "", "Images (*.jpg *.jpeg *.png *.gif)")
         if not paths:
@@ -481,28 +485,29 @@ class MainWindow(QMainWindow):
         if len(names) == 1:
             text = names[0]
         else:
-            text = ", ".join(names[:3]) + (f" and {len(names) - 3} more"
-                                           if len(names) > 3 else "")
+            text = ", ".join(names[:MAX_SHOWN_PHOTOS]) + (
+                f" and {len(names) - MAX_SHOWN_PHOTOS} more"
+                if len(names) > MAX_SHOWN_PHOTOS else "")
         self.photos_label.setText(text)
         self.photos_label.setStyleSheet("color: #28a745; font-weight: bold;")
 
     # -- schedule ----------------------------------------------------------------
 
-    def _add_time(self):
-        t = self.time_edit.time().toString("HH:mm")
+    def _add_time(self) -> None:
+        t = self.time_edit.time().toPyTime()
         if t not in self.times:
             self.times.append(t)
-            self.times_list.addItem(t)
+            self.times_list.addItem(format_time(t))
         self._save_group_schedule()
 
-    def _remove_time(self):
+    def _remove_time(self) -> None:
         item = self.times_list.currentItem()
         if not item:
-            QMessageBox.information(self, "No selection", "Select a time to remove.")
+            dialogs.inform(self, "No selection", "Select a time to remove.")
             return
         self._drop_time(item)
 
-    def _times_menu(self, pos):
+    def _times_menu(self, pos: QPoint) -> None:
         item = self.times_list.itemAt(pos)
         if item:
             menu = QMenu(self)
@@ -510,14 +515,15 @@ class MainWindow(QMainWindow):
                            lambda: self._drop_time(item))
             menu.exec_(self.times_list.mapToGlobal(pos))
 
-    def _drop_time(self, item):
-        t = item.text()
+    def _drop_time(self, item: QListWidgetItem) -> None:
+        # the item text is the canonical HH:MM display form
+        t = parse_time(item.text())
         if t in self.times:
             self.times.remove(t)
         self.times_list.takeItem(self.times_list.row(item))
         self._save_group_schedule()
 
-    def _save_group_schedule(self):
+    def _save_group_schedule(self) -> None:
         token_name = self.token_combo.currentText()
         group_name = self.group_combo.currentText()
         if not token_name or not group_name:
@@ -528,73 +534,73 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             self._log(f"Schedule not saved: {e}")
 
-    def _schedule(self):
-        different = self.different_check.isChecked()
+    def _schedule(self) -> None:
         post = PostData(
             text=self.text_edit.toPlainText().strip(),
             photo_paths=list(self.photo_paths),
-            different_posts=different,
+            different_posts=self.different_check.isChecked(),
             gif_name=self.gif_name_edit.text().strip(),
             gif_transform=self.gif_transform_check.isChecked(),
             sleep_time=self.sleep_spin.value(),
         )
-        start = self.start_date.date().toString("yyyy-MM-dd")
-        end = self.end_date.date().toString("yyyy-MM-dd")
+        start = self.start_date.date().toPyDate()
+        end = self.end_date.date().toPyDate()
 
         ok, error = self.scheduler.schedule(post, start, end, list(self.times))
         if ok:
-            QMessageBox.information(self, "Scheduled",
-                                    "Posts are queued, the worker will "
-                                    "create them in the background.")
+            dialogs.inform(self, "Scheduled",
+                           "Posts are queued, the worker will "
+                           "create them in the background.")
         else:
-            QMessageBox.warning(self, "Not scheduled", error or "Unknown error")
+            dialogs.warn(self, "Not scheduled", error or "Unknown error")
+
+    def _stop_worker(self) -> None:
+        self.scheduler.stop(preserve_jobs=True)
 
     # -- status -----------------------------------------------------------------
 
-    def _toggle_pause(self):
+    def _toggle_pause(self) -> None:
         if self.scheduler.is_paused():
             self.scheduler.resume()
         else:
             self.scheduler.pause()
 
-    def _clear_jobs(self):
-        if QMessageBox.question(
-                self, "Confirm",
-                "Remove all pending jobs? This cannot be undone.") != QMessageBox.Yes:
+    def _clear_jobs(self) -> None:
+        if not dialogs.ask(self, "Confirm",
+                           "Remove all pending jobs? This cannot be undone."):
             return
         self.scheduler.clear_all()
 
-    def _jobs_menu(self, pos):
+    def _jobs_menu(self, pos: QPoint) -> None:
         item = self.jobs_list.itemAt(pos)
         if not item:
             return
-        post_time = item.data(Qt.ItemDataRole.UserRole)
+        post_time = cast(str, item.data(Qt.ItemDataRole.UserRole))
         menu = QMenu(self)
         menu.addAction("Remove job", lambda: self._remove_job(post_time))
         menu.exec_(self.jobs_list.mapToGlobal(pos))
 
-    def _remove_job(self, post_time: str):
+    def _remove_job(self, post_time: str) -> None:
         if not post_time:
             return
-        if QMessageBox.question(
-                self, "Confirm", f"Remove the job for {post_time}?") != QMessageBox.Yes:
+        if not dialogs.ask(self, "Confirm", f"Remove the job for {post_time}?"):
             return
         if self.scheduler.cancel_job(post_time):
             self._log(f"Removed job {post_time}.")
         else:
-            QMessageBox.warning(self, "Not found", f"No pending job for {post_time}.")
+            dialogs.warn(self, "Not found", f"No pending job for {post_time}.")
 
     # -- worker updates -----------------------------------------------------------
 
-    def _log(self, message: str):
-        stamp = datetime.now().strftime("%H:%M:%S")
+    def _log(self, message: str) -> None:
+        stamp = datetime.datetime.now().strftime("%H:%M:%S")
         # escape angle brackets, qt would eat them
         self.log_view.append(f"[{stamp}] {html.escape(message)}")
         bar = self.log_view.verticalScrollBar()
         if bar is not None:
             bar.setValue(bar.maximum())
 
-    def _refresh_progress(self):
+    def _refresh_progress(self) -> None:
         stats = self.scheduler.stats()
         self.progress.setMaximum(max(1, stats["total"]))
         self.progress.setValue(stats["completed"])
@@ -618,18 +624,19 @@ class MainWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, job["post_time"])
                 self.jobs_list.addItem(item)
 
-    def _show_error(self, message: str, details: dict):
+    def _show_error(self, message: str, details: dict[str, Any]) -> None:
         self._log(message)
         self.raise_()
         self.activateWindow()
         dialog = ErrorDialog(self, message, details)
-        if dialog.exec_() == QDialog.Accepted:
+        if dialog.exec_() == QMessageBox.DialogCode.Accepted:
             self.scheduler.resume()
             self._log("Queue resumed.")
         else:
             self._log("Queue stays paused.")
 
-    def closeEvent(self, event):
+    def closeEvent(self, event: QCloseEvent | None) -> None:
         # stop the worker but keep unfinished jobs on disk
         self.scheduler.shutdown()
-        event.accept()
+        if event is not None:
+            event.accept()
