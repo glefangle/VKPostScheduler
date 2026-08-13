@@ -1,8 +1,10 @@
 import json
+from datetime import time
 
 import pytest
 
-from config import ConfigManager, Group, MemoryStore
+from vkpostscheduler.config import ConfigManager, Group, MemoryStore
+from vkpostscheduler.schedule_time import parse_time
 
 
 @pytest.fixture
@@ -55,7 +57,9 @@ def test_selection_requires_existing_entries(cfg):
     with pytest.raises(ValueError):
         cfg.set_selection("nope")
     cfg.add_token("t", "v")
-    cfg.get_token("t").add_group(Group("g", "42"))
+    token = cfg.get_token("t")
+    assert token is not None
+    token.add_group(Group("g", "42"))
     cfg.set_selection("t", "g")
     assert cfg.has_valid_selection()
     with pytest.raises(ValueError):
@@ -79,7 +83,7 @@ def test_v1_migration_moves_token_into_store(tmp_path):
     assert cfg.token_value("old") == "v1secret"
     assert "v1secret" not in path.read_text(encoding="utf-8")
     assert cfg.selected_group_id() == "123"
-    assert cfg.get_group_schedule("old", "g") == ["10:00"]
+    assert cfg.get_group_schedule("old", "g") == [time(10, 0)]
 
 
 def test_broken_config_backed_up(tmp_path):
@@ -102,19 +106,27 @@ def test_malformed_token_skipped(tmp_path):
     assert cfg.token_names() == ["good"]
 
 
-def test_group_schedule_time_validation(cfg):
+@pytest.mark.parametrize("bad", ["25:00", "abc", "09:60", "9am"])
+def test_group_schedule_rejects_malformed_times(bad):
+    # bad "HH:MM" strings die in the strict parser
+    with pytest.raises(ValueError):
+        parse_time(bad)
+
+
+def test_group_schedule_survives_the_json_roundtrip(tmp_path):
+    path = tmp_path / "config.json"
+    cfg = ConfigManager(str(path), MemoryStore())
     cfg.add_token("t", "v")
-    cfg.get_token("t").add_group(Group("g", "42"))
-    with pytest.raises(ValueError):
-        cfg.set_group_schedule("t", "g", ["25:00"])
-    with pytest.raises(ValueError):
-        cfg.set_group_schedule("t", "g", ["abc"])
-    with pytest.raises(ValueError):
-        cfg.set_group_schedule("t", "g", ["09:60"])
-    with pytest.raises(ValueError):
-        cfg.set_group_schedule("t", "g", ["9am"])
-    cfg.set_group_schedule("t", "g", ["09:30", "21:00"])
-    assert cfg.get_group_schedule("t", "g") == ["09:30", "21:00"]
+    token = cfg.get_token("t")
+    assert token is not None
+    token.add_group(Group("g", "42"))
+    cfg.set_group_schedule("t", "g", [time(9, 5)])
+
+    reloaded = ConfigManager(str(path), MemoryStore())
+    assert reloaded.get_group_schedule("t", "g") == [time(9, 5)]
+    # the file keeps the canonical "HH:MM" strings
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["tokens"]["t"]["groups"][0]["day_schedule"] == ["09:05"]
 
 
 def test_group_name_conflicts(cfg):
