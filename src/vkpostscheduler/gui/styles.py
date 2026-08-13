@@ -82,14 +82,3 @@ def apply_app_style() -> None:
     app = QApplication.instance()
     if isinstance(app, QApplication):
         app.setStyleSheet(MAIN_WINDOW_QSS)
-
-
-INPUT = """
-QLineEdit, QComboBox, QTimeEdit, QDateEdit, QSpinBox {
-    border: 2px solid #e9ecef; border-radius: 5px; padding: 6px 10px;
-    background: white; color: #495057;
-}
-QLineEdit:focus, QComboBox:focus, QTimeEdit:focus, QDateEdit:focus, QSpinBox:focus {
-    border-color: #4a90e2;
-}
-"""
