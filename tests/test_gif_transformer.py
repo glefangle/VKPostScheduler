@@ -2,7 +2,7 @@ import os
 
 from PIL import Image
 
-from gif_transformer import GIFTransformer
+from vkpostscheduler.gif_transformer import GIFTransformer
 
 
 def test_already_compliant_unchanged():

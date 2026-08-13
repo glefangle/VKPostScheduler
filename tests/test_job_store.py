@@ -1,6 +1,6 @@
 import json
 
-from job_store import JobStore
+from vkpostscheduler.job_store import JobStore
 
 
 def make_job(post_time, **extra):
@@ -51,7 +51,7 @@ def test_broken_file_backed_up(tmp_path):
     assert (tmp_path / "jobs.json.corrupt.bak").read_text(encoding="utf-8") == "{broken"
 
 
-def test_rotations(tmp_path):
+def test_rotation_survives_job_rewrites(tmp_path):
     store = JobStore(str(tmp_path / "jobs.json"))
     assert store.get_rotation("user_photos") == -1
     store.set_rotation("user_photos", 3)
