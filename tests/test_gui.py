@@ -1,13 +1,23 @@
-import pytest
-from PyQt5.QtCore import QTime
-from PyQt5.QtWidgets import QApplication, QMessageBox
-from test_scheduler import add_token_with_group
+from datetime import date, time
 
-import gui
-from config import ConfigManager, Group, MemoryStore
-from gui import APP_TITLE, ErrorDialog, GroupDialog, MainWindow, TokenDialog
-from job_store import JobStore
-from scheduler import PostData, PostScheduler
+import pytest
+from PyQt5.QtCore import Qt, QTime
+from PyQt5.QtWidgets import QApplication, QDialog, QMessageBox
+
+from tests.test_scheduler import add_token_with_group
+from vkpostscheduler.config import ConfigManager, Group, MemoryStore
+from vkpostscheduler.gui import (
+    APP_TITLE,
+    ErrorDialog,
+    GroupDialog,
+    MainWindow,
+    TokenDialog,
+    dialogs,
+)
+from vkpostscheduler.job_store import JobStore
+from vkpostscheduler.scheduler import PostData, PostScheduler
+
+DAY = date(2099, 1, 1)
 
 
 @pytest.fixture
@@ -59,7 +69,7 @@ def boxes(monkeypatch):
             recorded.append(("question", text))
             return QMessageBox.Yes
 
-    monkeypatch.setattr(gui, "QMessageBox", FakeBoxes)
+    monkeypatch.setattr(dialogs, "QMessageBox", FakeBoxes)
     return recorded
 
 
@@ -83,7 +93,7 @@ def test_status_log_escapes_html(qtbot, window):
 
 def test_close_event_stops_the_scheduler(qtbot, window):
     window.close()
-    assert window.scheduler._stop.is_set()
+    assert window.scheduler._stopping is True
 
 
 # -- dialogs -----------------------------------------------------------------
@@ -144,15 +154,15 @@ def test_error_dialog_formats_details_and_copies(qtbot, window):
 def test_add_time_persists_to_group_schedule(qtbot, window):
     window.time_edit.setTime(QTime(9, 30))
     window._add_time()
-    assert window.times == ["09:30"]
-    assert window.scheduler.config.get_group_schedule("t1", "g1") == ["09:30"]
+    assert window.times == [time(9, 30)]
+    assert window.scheduler.config.get_group_schedule("t1", "g1") == [time(9, 30)]
 
 
 def test_duplicate_time_is_not_added(qtbot, window):
     window.time_edit.setTime(QTime(9, 30))
     window._add_time()
     window._add_time()
-    assert window.times == ["09:30"]
+    assert window.times == [time(9, 30)]
     assert window.times_list.count() == 1
 
 
@@ -163,8 +173,8 @@ def test_remove_time_persists_removal(qtbot, window):
     window._add_time()
     window.times_list.setCurrentRow(0)
     window._remove_time()
-    assert window.times == ["10:00"]
-    assert window.scheduler.config.get_group_schedule("t1", "g1") == ["10:00"]
+    assert window.times == [time(10, 0)]
+    assert window.scheduler.config.get_group_schedule("t1", "g1") == [time(10, 0)]
 
 
 def test_group_switch_saves_schedule_under_previous_group(qtbot, window, sched):
@@ -179,8 +189,8 @@ def test_group_switch_saves_schedule_under_previous_group(qtbot, window, sched):
 
     window.group_combo.setCurrentText("g1")
     # the empty g2 state must not overwrite g1's saved schedule
-    assert sched.config.get_group_schedule("t1", "g1") == ["09:30"]
-    assert window.times == ["09:30"]
+    assert sched.config.get_group_schedule("t1", "g1") == [time(9, 30)]
+    assert window.times == [time(9, 30)]
 
 
 # -- scheduling from the gui ------------------------------------------------------
@@ -206,10 +216,71 @@ def test_schedule_without_times_shows_warning(qtbot, window, sched, boxes):
     assert "time" in boxes[0][1].lower()
 
 
+# -- worker error flow ---------------------------------------------------------
+
+ERROR_DETAILS = {"post_time": "2099-01-01 09:00", "group": "g1",
+                 "attempt": 0, "error": "ClientError: flood control"}
+
+
+def test_error_dialog_resume_choice_unpauses_the_queue(qtbot, window, sched,
+                                                       monkeypatch):
+    sched.pause()
+    shown = []
+
+    def record_exec(self: ErrorDialog) -> int:
+        shown.append(self.details)
+        return QDialog.Accepted
+
+    monkeypatch.setattr(ErrorDialog, "exec_", record_exec)
+
+    window.error_sig.emit("Posting error for 2099-01-01 09:00", ERROR_DETAILS)
+
+    assert sched.is_paused() is False
+    assert shown == [ERROR_DETAILS]
+    assert "Posting error for 2099-01-01 09:00" in window.log_view.toPlainText()
+
+
+def test_error_dialog_keep_paused_leaves_the_queue_stopped(qtbot, window, sched,
+                                                           monkeypatch):
+    sched.pause()
+    monkeypatch.setattr(ErrorDialog, "exec_", lambda self: QDialog.Rejected)
+
+    window.error_sig.emit("Posting error for 2099-01-01 09:00", ERROR_DETAILS)
+
+    assert sched.is_paused() is True
+    assert "Queue stays paused." in window.log_view.toPlainText()
+
+
 # -- status tab ----------------------------------------------------------------
 
+def test_pause_button_switches_to_resume_and_back(qtbot, window, sched):
+    qtbot.mouseClick(window.pause_btn, Qt.MouseButton.LeftButton)
+    assert sched.is_paused() is True
+    assert window.pause_btn.text() == "Resume queue"
+
+    qtbot.mouseClick(window.pause_btn, Qt.MouseButton.LeftButton)
+    assert sched.is_paused() is False
+    assert window.pause_btn.text() == "Pause queue"
+
+
+def test_status_tab_lists_each_rotation_slot(qtbot, window, sched):
+    post = PostData(text="hi", photo_paths=["a.jpg", "b.jpg", "c.jpg"],
+                    different_posts=True)
+    sched.schedule(post, DAY, date(2099, 1, 2), [time(9, 0)])
+
+    window.tabs.setCurrentWidget(window.status_tab)  # switching refreshes the list
+
+    items = [window.jobs_list.item(i) for i in range(window.jobs_list.count())]
+    assert [item.text() for item in items] == [
+        "2099-01-01 09:00  (try 1)  a.jpg  [1/3]",
+        "2099-01-02 09:00  (try 1)  b.jpg  [2/3]",
+    ]
+    assert [item.data(Qt.ItemDataRole.UserRole) for item in items] == \
+        ["2099-01-01 09:00", "2099-01-02 09:00"]
+
+
 def test_refresh_progress_shows_counters(qtbot, window, sched):
-    sched.schedule(PostData(text="hi"), "2099-01-01", "2099-01-02", ["09:00"])
+    sched.schedule(PostData(text="hi"), DAY, date(2099, 1, 2), [time(9, 0)])
 
     window._refresh_progress()
 
@@ -218,7 +289,7 @@ def test_refresh_progress_shows_counters(qtbot, window, sched):
 
 
 def test_remove_job_from_jobs_list(qtbot, window, sched, boxes):
-    sched.schedule(PostData(text="hi"), "2099-01-01", "2099-01-01", ["09:00"])
+    sched.schedule(PostData(text="hi"), DAY, DAY, [time(9, 0)])
     post_time = sched.store.load_jobs()[0]["post_time"]
 
     window._remove_job(post_time)
