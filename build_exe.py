@@ -1,6 +1,7 @@
 """Generate the PyInstaller spec and build dist/PostScheduler.exe."""
 
 import os
+import shutil
 import subprocess
 import sys
 
@@ -83,7 +84,7 @@ exe = EXE(
 """
 
 
-def write_spec():
+def write_spec() -> None:
     icon = "'icon.ico' if os.path.exists('icon.ico') else None"
     spec = SPEC_TEMPLATE % {
         "entry": ENTRY_POINT,
@@ -96,14 +97,14 @@ def write_spec():
         f.write(spec)
 
 
-def clean():
+def clean() -> None:
     for path in ("dist", "build"):
         full = os.path.join(ROOT, path)
         if os.path.isdir(full):
-            subprocess.run(["rmdir", "/s", "/q", full], shell=True, cwd=ROOT)
+            shutil.rmtree(full)
 
 
-def build():
+def build() -> int:
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", SPEC_PATH]
     result = subprocess.run(cmd, cwd=ROOT)
     if result.returncode != 0:

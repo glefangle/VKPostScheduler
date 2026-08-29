@@ -19,7 +19,7 @@ if errorlevel 1 %PY% -m pip install "pyinstaller>=6.0"
 if errorlevel 1 goto :fail
 
 %PY% -c "import PyQt5, requests, vk_api, PIL, keyring" >nul 2>&1
-if errorlevel 1 %PY% -m pip install -r requirements.txt
+if errorlevel 1 %PY% -m pip install -e .
 if errorlevel 1 goto :fail
 
 %PY% build_exe.py
