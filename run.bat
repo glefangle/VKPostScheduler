@@ -11,8 +11,8 @@ if not exist venv (
 call venv\Scripts\activate
 
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -e .
 
-python main.py
+python -m vkpostscheduler
 
 endlocal
