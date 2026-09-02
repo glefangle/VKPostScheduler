@@ -12,9 +12,9 @@ fi
 # Activate virtual environment
 source venv/bin/activate
 
-# Upgrade pip and install requirements
+# Upgrade pip and install the package
 python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt
+python3 -m pip install -e .
 
-# Run main.py
-python3 main.py
+# Run the installed package
+python3 -m vkpostscheduler
