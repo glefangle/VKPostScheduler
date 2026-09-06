@@ -1,103 +1,83 @@
 # VK Post Scheduler
 
-A Windows desktop application for mass-filling VK's native scheduled posts. It creates delayed posts through the API (`wall.post` with `publish_date`), so VK publishes them on its own. The app only needs to be running while the queue is being created, not at publication time.
+This is for those who run VK communities and got tired of scheduling posts one by one in the
+web interface, where VK only lets you set a publish date on a single post at a time.
+This app takes a text, a set of images and a date range with posting times, and
+queues all the delayed posts at once through the API (`wall.post` with
+`publish_date`). After that VK handles the publishing automatically: the app only needs to be
+running while the queue is being created, not at publication time.
 
-![Main interface](screenshots/main_interface.png)
-
-## How it works
-
-1. Add a VK access token and one or more communities.
-2. Write the text, pick photos or GIFs, set a date range and a list of times.
-3. The app turns every date/time pair into a job in a persistent queue (`jobs_state.json`).
-4. A background worker uploads the media and creates the delayed posts one by one.
-
-Jobs survive restarts. A failed job is retried up to 3 times with growing delays. Errors that no retry can fix (blocked application, auth failure, a publish time in the past) fail immediately.
-
-## Token storage
-
-Tokens are kept in the **Windows Credential Manager**, not in a file. The `vk_config.json` file holds only names, group ids and schedules; the secrets go through the [`keyring`](https://pypi.org/project/keyring/) library into the OS credential store, tied to your Windows account. On macOS/Linux the same code uses Keychain / Secret Service.
-
-On the first start after an upgrade from an older version, existing tokens are moved out of `vk_config.json` into the credential store automatically. The plain-text copy is not kept.
-
-To inspect or remove stored tokens manually: Control Panel > Credential Manager > Windows Credentials, look for entries named `VKPostScheduler`.
-
-## Requirements
-
-- Python 3.10 or newer
-- Windows (the code itself also runs on Linux/macOS)
+![Main window](screenshots/main_interface.png)
 
 ## Installation
 
-Run `run.bat`: it creates a virtual environment, installs dependencies and starts the app. Manually:
+You need Python 3.10 or newer. The app is written for Windows; the code itself
+also runs on Linux and macOS.
+
+The short way on Windows: run `run.bat`. It creates a virtual environment,
+installs the package and starts the app. By hand:
 
 ```bash
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirements.txt
+pip install -e .
 python main.py
 ```
 
-## Getting a token
+The project is an installable package, so after `pip install -e .` the
+`vkpostscheduler` command and `python -m vkpostscheduler` work too.
 
-1. Create a standalone application at [vk.com/dev](https://vk.com/dev).
-2. Open this URL in a browser, replacing `YOUR_APP_ID` with your application id:
+## First run: token and groups
 
-```
-https://oauth.vk.com/authorize?client_id=YOUR_APP_ID&display=page&redirect_uri=https://oauth.vk.com/blank.html&scope=wall,photos,docs,groups&response_type=token&v=5.131
-```
+The app posts through one or more access tokens; each token carries the
+communities you post to.
 
-3. Authorize and copy the token from the redirect URL.
-4. In the app: **Add** next to *Token*, paste it; then **Add** next to *Group* and enter the group id (the number from `vk.com/club123456789`).
+1. Get the VK API Token
+2. In the app: **Add** next to *Token*, give it a name and paste the value.
+3. **Add** next to *Group*: a display name and the group id (the number from
+   `vk.com/club123456789`).
+
+The token value goes into the **Windows Credential
+Manager** through the [`keyring`](https://pypi.org/project/keyring/) library,
+tied to your Windows account; on Linux and macOS the same code uses Keychain
+or the Secret Service. `vk_config.json` holds only names, group ids and
+schedules. To inspect or remove a stored token by hand: Control Panel >
+Credential Manager > Windows Credentials, entries named `VKPostScheduler`.
+Tokens left over from older versions are moved into the credential store
+automatically on first start.
 
 ## Usage
 
-- **Post** tab: token/group selection, text, images (JPG/PNG/GIF), GIF name.
-- **Schedule** tab: date range, posting times, delay between posts, Schedule/Stop.
-- **Status** tab: progress, counters, pending jobs (right-click to remove one), pause/resume, log.
+Three tabs:
 
-Behaviors worth knowing:
+- **Post**: token and group selection, text, images (JPG/PNG/GIF), GIF name.
+- **Schedule**: date range, posting times, delay between posts, the Schedule
+  and Stop buttons.
+- **Status**: progress, pending jobs, pause/resume, log.
 
-- **Different posts** hands out images from your selection to time slots one by one and stops scheduling when the pool runs out. Each new plan starts from the first image again.
-- Schedules and default text are saved per group; adding or removing a time saves it to the selected group automatically.
-- GIFs are uploaded as documents and padded or cropped to VK's aspect ratio limits (0.66:1 to 2.5:1) when the transform option is on.
-- On a posting error the queue pauses and shows the details; you decide whether to resume.
+Pressing Schedule turns every date/time pair into a job in a persistent queue,
+and a background worker uploads the media and creates the delayed posts one by
+one. You can close the app while it works: pending jobs survive the restart
+and the worker picks them up on the next start.
 
-## Configuration files
+Good to know:
 
-Runtime files live in the per-user data directory (`%APPDATA%\VKPostScheduler` on Windows, `~/.local/share/VKPostScheduler` elsewhere), not in the working directory. On the first start after an upgrade, files left by older versions are moved there automatically.
-
-| File | Purpose |
-|---|---|
-| `<data dir>\vk_config.json` | Token names, groups, per-group schedules and default text. No secrets. |
-| Windows Credential Manager | Token values, entries under `VKPostScheduler` |
-| `<data dir>\jobs_state.json` | Persistent job queue and photo rotation state |
-| `<data dir>\logs\app_*.log` | Application log |
-| `<data dir>\error.log` | Errors only |
-| `<data dir>\crash.log` | Uncaught exceptions |
-
-If a config file gets corrupted, the app moves it aside to `*.corrupt.bak` and starts with an empty one instead of wiping it silently.
-
-## Tests
-
-```bash
-python -m pip install -r requirements-dev.txt
-python -m pytest tests
-```
-
-The suite covers the queue core and the GUI (PyQt5, run offscreen via pytest-qt). Ruff and mypy run in CI (`.github/workflows/ci.yml`); locally:
-
-```bash
-ruff check .
-mypy .
-```
-
-## Building a standalone executable
-
-```batch
-build_exe.bat
-```
-
-Produces `dist\PostScheduler.exe` via PyInstaller.
+- **Different posts** (on by default) hands out images from your selection to
+  time slots one by one and stops scheduling when the pool runs out; each new
+  plan starts from the first image again. With the box off, every post uses
+  the first image from the selection.
+- The time list and the default text are remembered per group: adding or
+  removing a time saves it to the selected group automatically. A plan always
+  targets the currently selected group; store as many tokens and groups as
+  you need and switch between them.
+- Scheduling a new plan replaces the previous one. In the Status tab you can
+  also remove a single job (right-click it) or clear the whole queue.
+- GIFs are uploaded as documents; with "Transform GIFs" on (default) they are
+  padded or cropped to VK's aspect ratio limits (0.66:1 to 2.5:1) first.
+- On a posting error the queue pauses and a dialog shows the details; you
+  decide whether to resume. Retryable errors are retried up to 3 times with
+  growing delays; errors no retry can fix (blocked application, auth failure,
+  a publish time in the past) fail immediately.
 
 ## Project structure
 
