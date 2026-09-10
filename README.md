@@ -79,56 +79,59 @@ Good to know:
   growing delays; errors no retry can fix (blocked application, auth failure,
   a publish time in the past) fail immediately.
 
-## Project structure
+## Where your data lives
 
+Everything the app writes goes to one per-user folder, not to the working
+directory: `%APPDATA%\VKPostScheduler` on Windows and
+`~/.local/share/VKPostScheduler` elsewhere. There you will find:
+
+- `vk_config.json`: token names, groups, per-group schedules and default
+  text; no secrets.
+- `jobs_state.json`: the pending queue and the photo rotation state.
+- `logs\app_*.log`: the full application log, plus `error.log` for errors
+  only and `crash.log` for uncaught exceptions.
+
+If a config file gets corrupted, the app moves it aside to `*.corrupt.bak` and
+starts with an empty one instead of wiping it silently. Files left in the
+working directory by older versions are moved here on first start.
+
+## Known limitations
+
+- Posts cannot be scheduled retroactively. If the app sat closed past a slot,
+  or earlier jobs errored for long enough, that job fails with "publish time
+  has already passed".
+- If VK blocked the standalone application your token belongs to, posts fail
+  immediately; create a new application and a new token.
+- VK occasionally answers with a captcha (error 14), which the API client
+  cannot answer; wait and try again later.
+- Credential Manager entries do not travel with file copies: on a fresh
+  machine, re-enter the tokens.
+- For anything else, check the Status tab log and `error.log`.
+
+## Building a standalone executable
+
+`build_exe.bat` installs PyInstaller into the venv if it is missing and
+produces `dist\PostScheduler.exe`. `build_exe.py` writes a size-optimized
+`PostScheduler.spec` on every build; the spec is generated, so it is not
+tracked in git.
+
+## Development
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest tests
+ruff check .
+mypy .
 ```
-main.py              Entry point: logging, crash handling, Qt loop, app wiring
-gui.py               PyQt5 interface (VK texts/labels live in constants at the top)
-scheduler.py         Job queue, worker thread, retries, photo rotation
-job_store.py         Persistence for the queue (jobs_state.json)
-jsonio.py            Shared json io for the state files (atomic writes, corrupt backups)
-paths.py             Per-user data dir and legacy file migration
-posting_client.py    PostClient contract and shared error types
-vk_client.py         VK backend: vk_api calls, VK error-code mapping
-config.py            Token/target configuration, keyring storage
-gif_transformer.py   GIF aspect ratio fixing (Pillow), limits passed in by the client
-tests/               pytest suite (core + GUI)
-```
 
-The queue core (`scheduler.py`, `job_store.py`, `jsonio.py`, `config.py`, `posting_client.py`) does not import `vk_api`: it is imported only inside `vk_client.py`, so the backend is the only VK-specific module.
-
-## Troubleshooting
-
-- **`ApiError: [8] Application is blocked`** — the standalone app the token belongs to was blocked by VK; create a new application and token. The app detects this and fails such jobs immediately instead of retrying.
-- **`Publish time ... has already passed`** — the job sat in the queue too long (the app was closed, or earlier jobs errored). Posts cannot be scheduled retroactively.
-- **`ApiError: [14]` (captcha)** — VK is asking for a captcha, which the API client cannot answer; wait and try again later.
-- **Token errors on a fresh machine** — Credential Manager entries do not travel with file copies; re-enter the tokens or copy them via `keyring` on the old machine.
-- Check `error.log` and the Status tab for anything else.
+The test suite covers the queue core and the GUI (PyQt5, run offscreen via
+pytest-qt). Ruff, mypy and the tests also run in CI on Linux and Windows.
 
 ## Changelog
 
-### 1.2.0
+### 1.3.0
 
-- Runtime files moved to the per-user data directory; files from older versions are migrated on first start. Nothing is written to the working directory anymore.
-- The single-photo `photo_path` plan field is unified into `photo_paths`; plans stored by older versions still load.
-- Time validation no longer relies on `assert`.
-- Internal: typing checked with mypy, style checked with ruff (both run in CI along with the test suite on Linux and Windows); GUI covered by pytest-qt tests; Python 3.10+ required.
-
-### 1.1.0
-
-- Internal refactor, no user-visible behavior changes: the queue core is now platform-neutral (`posting_client.py` defines the client contract, `vk_config.py` became generic `config.py`), and `vk_api` is imported only inside `vk_client.py`. GIF transformer limits are passed in by the backend instead of being hard-coded.
-- The group-id number check moved from the config layer into the add/edit dialog.
-
-### 1.0.0
-
-- Tokens now live in the Windows Credential Manager (keyring); `vk_config.json` holds no secrets, and tokens from older versions migrate automatically on first start.
-- The codebase was reworked: the queue worker, persistence and VK API calls were split into focused modules (`scheduler.py`, `job_store.py`, `vk_client.py`), the queue internals are covered by tests.
-- Permanent VK errors (5, 7, 8, 15, 100) and expired publish times fail immediately instead of burning the retry cycle.
-- Media upload requests have network timeouts; the VK session is reused between posts.
-- `jobs_state.json` and `vk_config.json` are written atomically; an unreadable file is backed up to `*.corrupt.bak` instead of being silently reset.
-- Removing a job from the Status tab also cancels it in the worker; rescheduling cannot resurrect jobs from an old plan.
-- GIFs are padded or cropped to VK's aspect ratio limits before upload.
-
-### 0.9.5 - 0.9.7
-
-PyQt5 interface, photo rotation, persistent job state, pause/resume, progress tracking, GIF transformation.
+- The application moved into an installable `src/vkpostscheduler` package: `pip install -e .` provides the `vkpostscheduler` command and `python -m vkpostscheduler`; `main.py` at the repo root stays as the launcher for `python main.py` and for PyInstaller.
+- Time strings are parsed in one place now (`schedule_time.py`); the scheduler, config and gui go through those parsers instead of handling format strings on their own.
+- The test suite gained regression tests for the scheduler's pause and retry waits; all tests and fixtures use the package imports.
+- Internal: the whole codebase is annotated so the strict mypy pair holds project-wide, and the run and build scripts install the package instead of requirements files.
