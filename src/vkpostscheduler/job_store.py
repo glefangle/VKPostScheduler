@@ -69,6 +69,20 @@ class JobStore:
             self._save_doc(doc)
             return True
 
+    def set_attempt(self, post_time: str, attempt: int) -> bool:
+        """Persist a job's retry counter so restarts keep the budget."""
+        with self.lock:
+            doc = self._load_doc()
+            rows = self._valid_rows(doc.get("jobs", []))
+            hits = [row for row in rows if row.get("post_time") == post_time]
+            if not hits:
+                return False
+            for row in hits:
+                row["attempt"] = attempt
+            doc["jobs"] = rows
+            self._save_doc(doc)
+            return True
+
     def clear_jobs(self) -> None:
         with self.lock:
             doc = self._load_doc()

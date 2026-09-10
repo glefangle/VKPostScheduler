@@ -265,6 +265,25 @@ def test_rate_limit_error_gives_the_job_one_more_try(sched, monkeypatch):
     assert retried["attempt"] == 1
 
 
+def test_retry_budget_survives_a_restart(sched, monkeypatch):
+    monkeypatch.setattr("vkpostscheduler.scheduler.ERROR_WAIT", 0.05)
+    monkeypatch.setattr(sched, "_wait_out_backoff", lambda seconds: "ok")
+
+    sched.schedule(make_post(), DAY, DAY, [time(9, 0)])
+    taken = sched._next_job()  # the worker pops the job before executing it
+    assert taken is not None
+    assert sched._handle_failure(taken, ClientError("rate limited")) == "ok"
+
+    # a fresh scheduler over the same store acts out an app restart
+    restarted = PostScheduler(config=sched.config,
+                              store=JobStore(sched.store.path))
+    monkeypatch.setattr(restarted, "ensure_worker", lambda: None)
+    assert restarted.reload_pending() == 1
+    retried = restarted._next_job()
+    assert retried is not None
+    assert retried["attempt"] == 1
+
+
 def test_error_classification_boundaries():
     """Pin the retry/no-retry boundary the scheduler works from."""
     assert PostScheduler._is_permanent(PublishTimeInPastError("past")) is True

@@ -447,13 +447,14 @@ class PostScheduler:
             return "stopped"
 
         if attempt < MAX_RETRIES:
+            # persist before the wait: a stop mid-backoff keeps the spent try
+            job["attempt"] = attempt + 1
+            self.store.set_attempt(post_time, attempt + 1)
             backoff = (attempt + 1) * 60
             self._status(f"Retrying {post_time} in {backoff // 60} min "
                          f"(retry {attempt + 1}/{MAX_RETRIES})", important=True)
             if self._wait_out_backoff(backoff) == "stopped":
                 return "stopped"
-            # TODO: attempt count is queue-only, a restart resets the retry budget
-            job["attempt"] = attempt + 1
             self._enqueue([job])
         else:
             self._fail_job(job, f"{post_time} failed after "

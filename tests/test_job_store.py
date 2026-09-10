@@ -30,6 +30,14 @@ def test_add_and_remove(tmp_path):
     assert store.pending_count() == 0
 
 
+def test_set_attempt_updates_only_the_matching_row(tmp_path):
+    store = JobStore(str(tmp_path / "jobs.json"))
+    store.add_jobs([make_job("2026-10-01 09:00"), make_job("2026-10-01 10:00")])
+    assert store.set_attempt("2026-10-01 09:00", 2) is True
+    assert [j["attempt"] for j in store.load_jobs()] == [2, 0]
+    assert store.set_attempt("2026-10-01 11:00", 1) is False
+
+
 def test_malformed_rows_dropped(tmp_path):
     path = tmp_path / "jobs.json"
     path.write_text(json.dumps({"jobs": [
