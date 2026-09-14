@@ -1,4 +1,4 @@
-"""VK-specific part of the error mapping: ApiError codes -> ClientError."""
+"""VK client specifics: error mapping and the gif ratio limits."""
 
 import pytest
 from vk_api.exceptions import ApiError
@@ -45,3 +45,16 @@ def test_vk_error_without_payload_still_gets_its_code():
     wrapped = VKClient._wrap(UnstructuredVkError())
     assert wrapped.code == 7
     assert wrapped.permanent is True
+
+
+def test_gif_ratio_limits_are_pinned():
+    """Pin the document ratio limits the vk backend enforces."""
+    assert VKClient.GIF_MIN_RATIO == 0.66
+    assert VKClient.GIF_MAX_RATIO == 2.5
+
+
+def test_client_hands_its_limits_to_the_transformer():
+    client = VKClient()
+    assert client.gif.min_ratio == VKClient.GIF_MIN_RATIO
+    assert client.gif.max_ratio == VKClient.GIF_MAX_RATIO
+    assert client.gif.tag == "vk"

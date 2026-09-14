@@ -23,7 +23,6 @@ PERMANENT_VK_CODES = {5, 7, 8, 15, 100}
 
 
 class VKClient(PostClient):
-    # vk crops documents outside this range; TODO: limits are reverse-engineered
     GIF_MIN_RATIO = 0.66
     GIF_MAX_RATIO = 2.5
 
