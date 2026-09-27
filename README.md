@@ -7,7 +7,7 @@ queues all the delayed posts at once through the API (`wall.post` with
 `publish_date`). After that VK handles the publishing automatically: the app only needs to be
 running while the queue is being created, not at publication time.
 
-![Main window](screenshots/main_interface.png)
+![Main window](screenshots/screenshot2.png)
 
 ## Installation
 
