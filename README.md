@@ -11,6 +11,16 @@ running while the queue is being created, not at publication time.
 
 ## Installation
 
+## Quick Start
+
+1. **Download the archive and run the executable from the unpacked archive**:
+
+[VKPostScheduler_1.3.0.zip](https://github.com/glefangle/VKPostScheduler/releases/download/v1.3.0/VKPostScheduler.zip)
+
+2. **Go to First run: token and groups**
+
+## Manual build
+
 You need Python 3.10 or newer. The app is written for Windows; the code itself
 also runs on Linux and macOS.
 
