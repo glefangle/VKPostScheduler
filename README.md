@@ -137,6 +137,13 @@ mypy .
 The test suite covers the queue core and the GUI (PyQt5, run offscreen via
 pytest-qt). Ruff, mypy and the tests also run in CI on Linux and Windows.
 
+**Important Notice:** `VKPostScheduler` interacts with VK API. Please be aware that VK (VKontakte) policy regarding third-party automation and unofficial tools has recently become extremely restrictive. 
+
+As of 2026, VK systematically restricts free API methods (including `wall.post`), enforces harsh monthly request limits, and implements paid tiers to block or phase out unofficial client software and automated tools.
+
+* **Use at Your Own Risk:** The author of this repository is not responsible for any temporary or permanent bans on your VK accounts/groups, or the revocation of your access tokens.
+* **Provided "As Is":** This application is provided for educational and personal use with absolutely no guarantees. Due to platform restrictions and ongoing API policy changes, any automated posting functionality may break or become blocked by VK at any moment.
+
 ## Changelog
 
 ### 1.3.0
